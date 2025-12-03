@@ -1,0 +1,14 @@
+[
+  { "id": "t1", "label": "1. Limpieza de Bandejas", "category": "Apertura", "requiresPhoto": false, "targetStores": ["all"] },
+  { "id": "t2", "label": "2. Limpieza Mostrador", "category": "Apertura", "requiresPhoto": false, "targetStores": ["all"] },
+  { "id": "t3", "label": "3. Revisión Escaparate", "category": "Apertura", "requiresPhoto": true, "targetStores": ["all"] },
+  { "id": "t4", "label": "4. Limpieza Puerta", "category": "Apertura", "requiresPhoto": false, "targetStores": ["all"] },
+  { "id": "t5", "label": "5. Limpieza Espejos", "category": "Mantenimiento", "requiresPhoto": false, "targetStores": ["all"] },
+  { "id": "t6", "label": "7. Aspirado Asientos", "category": "Mantenimiento", "requiresPhoto": false, "targetStores": ["all"] },
+  { "id": "t7", "label": "8. Basura / Cartón", "category": "Cierre", "requiresPhoto": false, "targetStores": ["all"] },
+  { "id": "t8", "label": "10. Antihurto", "category": "Apertura", "requiresPhoto": false, "targetStores": ["all"] },
+  { "id": "t9", "label": "11. Cuarto Ascensor", "category": "Mantenimiento", "requiresPhoto": false, "targetStores": ["T1", "T3"] },
+  { "id": "t10", "label": "15. Naya / Altillo", "category": "Mantenimiento", "requiresPhoto": true, "targetStores": ["T2", "T4"] },
+  { "id": "t11", "label": "18. Perfilar Tienda", "category": "Cierre", "requiresPhoto": true, "targetStores": ["all"] },
+  { "id": "t12", "label": "6. Cierre Limpieza General", "category": "Cierre", "requiresPhoto": false, "targetStores": ["all"] }
+]
