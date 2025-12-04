@@ -11,48 +11,77 @@ import {
   getWeeklyAssignments,
   addWeeklyAssignment,
   syncFromApi,
-  getWeekKey
+  getWeekKey,
+  isDayClosed,
+  saveDailyClose,
+  unlockDay
 } from '../services/weekService';
-import { isApiConfigured } from '../services/api';
+import { isApiConfigured, saveTask } from '../services/api';
+import { useConfig, getTasksForDay, getCategoryStyle } from '../contexts/ConfigContext';
 
 const DAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 const MAX_CHANGES = 4;
 
-// Task Card Component - Industrial Style
-function TaskCard({ task, date, dayIndex, taskState, onTaskClick, isCustom, isSelected }) {
+// Task Card Component - Industrial Style with Category Badge
+function TaskCard({ task, date, dayIndex, taskState, onTaskClick, isCustom, isSelected, onShowInfo, dayClosed }) {
   const isDone = taskState?.status === 'DONE';
   const isPast = isPastDate(date);
   const isTodayDate = isToday(date);
   const isFuture = isFutureDate(date);
   const isLocked = (taskState?.history?.length || 0) >= MAX_CHANGES;
-  const isReadOnly = isPast && !isDone;
+  const isReadOnly = (isPast && !isDone) || dayClosed;
 
-  let borderColor = '#d1d5db';
+  // Estado y colores según lógica de semáforo
+  let borderColor = '#d1d5db';  // Gris default
   let bgColor = '#f9fafb';
   let statusText = 'Pendiente';
+  let statusIcon = '';
 
   if (isDone) {
+    // ✅ COMPLETADA - Verde
     borderColor = '#16a34a';
     bgColor = '#dcfce7';
+    statusIcon = '✓';
     statusText = taskState.employee;
   } else if (isPast) {
-    borderColor = '#f97316';
-    bgColor = '#ffedd5';
-    statusText = '⚠️ RETRASADA';
-  } else if (isTodayDate) {
+    // 🔴 RETRASADA - Día pasado sin completar - Rojo
     borderColor = '#dc2626';
     bgColor = '#fee2e2';
-    statusText = '🔴 URGENTE';
+    statusIcon = '⚠️';
+    statusText = 'RETRASADA';
+  } else if (isTodayDate) {
+    // 🟠 PENDIENTE HOY - Naranja (urgencia moderada)
+    borderColor = '#f97316';
+    bgColor = '#fff7ed';
+    statusIcon = '';
+    statusText = 'Pendiente';
+  } else {
+    // ⚪ PENDIENTE FUTURO - Gris
+    borderColor = '#d1d5db';
+    bgColor = '#f9fafb';
+    statusIcon = '';
+    statusText = 'Pendiente';
   }
 
   const handleClick = () => {
+    if (dayClosed) {
+      alert('Este día ya está cerrado. No se pueden modificar las tareas.');
+      return;
+    }
     if (isReadOnly) return;
     if (isLocked) {
-      alert('Esta tarea ha alcanzado el límite de 3 cambios.');
+      alert('Esta tarea ha alcanzado el límite de 4 cambios.');
       return;
     }
     onTaskClick(task, dayIndex + 1, date);
   };
+
+  const handleInfoClick = (e) => {
+    e.stopPropagation();
+    onShowInfo(task);
+  };
+
+  const categoryStyle = getCategoryStyle(task.category);
 
   return (
     <div
@@ -66,38 +95,69 @@ function TaskCard({ task, date, dayIndex, taskState, onTaskClick, isCustom, isSe
         borderRadius: '2px',
         cursor: isReadOnly ? 'not-allowed' : 'pointer',
         opacity: isReadOnly ? 0.6 : 1,
-        fontSize: '11px',
+        fontSize: '12px',
         boxSizing: 'border-box',
         position: 'relative',
         outline: isSelected ? '2px solid #3b82f6' : 'none',
         outlineOffset: '-2px'
       }}
     >
-      <div style={{ fontWeight: '600', color: '#111827', marginBottom: '2px', lineHeight: '1.2' }}>
+      {/* Category Badge */}
+      {task.category && !isCustom && (
+        <span style={{
+          position: 'absolute',
+          top: '2px',
+          right: '2px',
+          fontSize: '9px',
+          padding: '1px 4px',
+          borderRadius: '2px',
+          ...categoryStyle
+        }}>
+          {task.category}
+        </span>
+      )}
+      
+      <div style={{ fontWeight: '600', color: '#111827', marginBottom: '2px', lineHeight: '1.2', paddingRight: '45px' }}>
         {isCustom ? '📋 ' : ''}{task.label}
       </div>
       <div style={{ 
-        fontSize: '10px', 
-        color: isDone ? '#166534' : isPast ? '#c2410c' : isTodayDate ? '#b91c1c' : '#6b7280'
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px',
+        fontSize: '11px', 
+        color: isDone ? '#166534' : isPast ? '#b91c1c' : isTodayDate ? '#c2410c' : '#6b7280'
       }}>
-        {isDone ? `✓ ${statusText}` : statusText}
+        <span>{statusIcon} {statusText}</span>
+        {/* Info icon */}
+        {task.description && (
+          <button
+            onClick={handleInfoClick}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: '0 2px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              color: '#6b7280'
+            }}
+            title="Ver descripción"
+          >ℹ️</button>
+        )}
       </div>
       {isLocked && (
-        <span style={{ position: 'absolute', top: '4px', right: '4px', fontSize: '10px' }}>🔒</span>
+        <span style={{ position: 'absolute', bottom: '4px', right: '4px', fontSize: '11px' }}>🔒</span>
       )}
       {task.requiresPhoto && !isDone && (
-        <span style={{ position: 'absolute', top: '4px', right: isLocked ? '20px' : '4px', fontSize: '10px' }}>📷</span>
+        <span style={{ position: 'absolute', bottom: '4px', right: isLocked ? '20px' : '4px', fontSize: '11px' }}>📷</span>
       )}
     </div>
   );
 }
 
-// Task Edit Modal with keyboard navigation
-function TaskModal({ task, dayIndex, date, taskState, onClose, onUpdate }) {
-  const [employeeNumber, setEmployeeNumber] = useState('');
-  const [employeeName, setEmployeeName] = useState('');
-  const numberInputRef = useRef(null);
-  const nameInputRef = useRef(null);
+// Task Edit Modal with employee selector
+function TaskModal({ task, dayIndex, date, taskState, onClose, onUpdate, employees }) {
+  const [selectedEmployee, setSelectedEmployee] = useState('');
+  const selectRef = useRef(null);
   const submitBtnRef = useRef(null);
   const pendingBtnRef = useRef(null);
   
@@ -105,14 +165,12 @@ function TaskModal({ task, dayIndex, date, taskState, onClose, onUpdate }) {
   const history = taskState?.history || [];
   const changesLeft = MAX_CHANGES - history.length;
 
-  // Focus first input on mount
+  // Focus select on mount - always focus select since we now need employee for both actions
   useEffect(() => {
-    if (!isDone && numberInputRef.current) {
-      numberInputRef.current.focus();
-    } else if (isDone && pendingBtnRef.current) {
-      pendingBtnRef.current.focus();
+    if (selectRef.current) {
+      selectRef.current.focus();
     }
-  }, [isDone]);
+  }, []);
 
   // Handle Escape key
   useEffect(() => {
@@ -126,34 +184,39 @@ function TaskModal({ task, dayIndex, date, taskState, onClose, onUpdate }) {
   }, [onClose]);
 
   const handleMarkDone = () => {
-    const fullName = [employeeNumber, employeeName].filter(Boolean).join(' - ');
-    if (!fullName.trim()) {
-      alert('Introduce al menos el número o nombre del empleado');
+    if (!selectedEmployee) {
+      alert('Selecciona un empleado');
       return;
     }
-    onUpdate({ status: 'DONE', employee: fullName.trim() });
-    onClose();
+    onUpdate({ status: 'DONE', employee: selectedEmployee });
+    // Close modal immediately after update
+    setTimeout(() => onClose(), 0);
   };
 
   const handleMarkPending = () => {
-    onUpdate({ status: 'PENDING', employee: null });
-    onClose();
-  };
-
-  const handleNumberKeyDown = (e) => {
-    if (e.key === 'Enter' || e.key === 'ArrowDown') {
-      e.preventDefault();
-      nameInputRef.current?.focus();
+    if (!selectedEmployee) {
+      alert('Selecciona un empleado');
+      return;
     }
+    onUpdate({ status: 'PENDING', employee: selectedEmployee });
+    // Close modal immediately after update
+    setTimeout(() => onClose(), 0);
   };
 
-  const handleNameKeyDown = (e) => {
-    if (e.key === 'Enter' || e.key === 'ArrowDown') {
+  const handleSelectKeyDown = (e) => {
+    if (e.key === 'Enter') {
       e.preventDefault();
-      submitBtnRef.current?.focus();
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      numberInputRef.current?.focus();
+      if (selectedEmployee) {
+        if (isDone) {
+          handleMarkPending();
+        } else {
+          handleMarkDone();
+        }
+      } else {
+        submitBtnRef.current?.focus();
+      }
+    } else if (e.key === 'ArrowDown' && e.altKey) {
+      // Let default behavior open dropdown
     }
   };
 
@@ -163,18 +226,18 @@ function TaskModal({ task, dayIndex, date, taskState, onClose, onUpdate }) {
       handleMarkDone();
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      nameInputRef.current?.focus();
+      selectRef.current?.focus();
     }
   };
 
   const handlePendingKeyDown = (e) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && selectedEmployee) {
       e.preventDefault();
       handleMarkPending();
     }
   };
 
-  const canSubmit = employeeNumber.trim() || employeeName.trim();
+  const canSubmit = !!selectedEmployee;
 
   return (
     <div style={{
@@ -196,8 +259,8 @@ function TaskModal({ task, dayIndex, date, taskState, onClose, onUpdate }) {
         width: '400px',
         maxWidth: '90vw'
       }} onClick={e => e.stopPropagation()}>
-        <h3 style={{ margin: '0 0 8px 0', fontSize: '16px' }}>{task.label}</h3>
-        <p style={{ margin: '0 0 16px 0', fontSize: '12px', color: '#6b7280' }}>
+        <h3 style={{ margin: '0 0 8px 0', fontSize: '17px' }}>{task.label}</h3>
+        <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#6b7280' }}>
           {DAYS[dayIndex]} - {formatDateShort(date)}
         </p>
         
@@ -206,7 +269,7 @@ function TaskModal({ task, dayIndex, date, taskState, onClose, onUpdate }) {
           padding: '8px',
           borderRadius: '4px',
           marginBottom: '16px',
-          fontSize: '12px',
+          fontSize: '13px',
           textAlign: 'center'
         }}>
           Cambios restantes: <strong>{changesLeft}</strong> de {MAX_CHANGES}
@@ -214,10 +277,10 @@ function TaskModal({ task, dayIndex, date, taskState, onClose, onUpdate }) {
 
         {history.length > 0 && (
           <div style={{ marginBottom: '16px' }}>
-            <h4 style={{ fontSize: '12px', margin: '0 0 8px 0', color: '#374151' }}>Historial:</h4>
+            <h4 style={{ fontSize: '13px', margin: '0 0 8px 0', color: '#374151' }}>Historial:</h4>
             {history.map((h, i) => (
               <div key={i} style={{
-                fontSize: '11px',
+                fontSize: '12px',
                 padding: '4px 8px',
                 background: '#f9fafb',
                 borderLeft: `3px solid ${h.status === 'DONE' ? '#16a34a' : '#ef4444'}`,
@@ -229,77 +292,68 @@ function TaskModal({ task, dayIndex, date, taskState, onClose, onUpdate }) {
           </div>
         )}
 
+        {/* Employee selector - always shown */}
+        <select
+          ref={selectRef}
+          value={selectedEmployee}
+          onChange={e => setSelectedEmployee(e.target.value)}
+          onKeyDown={handleSelectKeyDown}
+          style={{
+            width: '100%',
+            padding: '10px',
+            border: '1px solid #d1d5db',
+            borderRadius: '4px',
+            marginBottom: '12px',
+            fontSize: '15px',
+            boxSizing: 'border-box',
+            background: 'white',
+            cursor: 'pointer'
+          }}
+        >
+          <option value="">-- Selecciona empleado --</option>
+          {employees.map(emp => (
+            <option key={emp.id} value={`${emp.id} - ${emp.name}`}>
+              {emp.id} - {emp.name}
+            </option>
+          ))}
+        </select>
+        
         {!isDone ? (
-          <>
-            <input
-              ref={numberInputRef}
-              type="text"
-              placeholder="Nº Empleado"
-              value={employeeNumber}
-              onChange={e => setEmployeeNumber(e.target.value)}
-              onKeyDown={handleNumberKeyDown}
-              style={{
-                width: '100%',
-                padding: '10px',
-                border: '1px solid #d1d5db',
-                borderRadius: '4px',
-                marginBottom: '8px',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            />
-            <input
-              ref={nameInputRef}
-              type="text"
-              placeholder="Nombre"
-              value={employeeName}
-              onChange={e => setEmployeeName(e.target.value)}
-              onKeyDown={handleNameKeyDown}
-              style={{
-                width: '100%',
-                padding: '10px',
-                border: '1px solid #d1d5db',
-                borderRadius: '4px',
-                marginBottom: '12px',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            />
-            <button
-              ref={submitBtnRef}
-              onClick={handleMarkDone}
-              onKeyDown={handleSubmitKeyDown}
-              disabled={!canSubmit}
-              style={{
-                width: '100%',
-                padding: '10px',
-                background: canSubmit ? '#16a34a' : '#d1d5db',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                fontSize: '14px',
-                fontWeight: '600',
-                cursor: canSubmit ? 'pointer' : 'not-allowed'
-              }}
-            >
-              ✓ Marcar como HECHA (Enter)
-            </button>
-          </>
+          <button
+            ref={submitBtnRef}
+            onClick={handleMarkDone}
+            onKeyDown={handleSubmitKeyDown}
+            disabled={!canSubmit}
+            style={{
+              width: '100%',
+              padding: '10px',
+              background: canSubmit ? '#16a34a' : '#d1d5db',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              fontSize: '15px',
+              fontWeight: '600',
+              cursor: canSubmit ? 'pointer' : 'not-allowed'
+            }}
+          >
+            ✓ Marcar como HECHA (Enter)
+          </button>
         ) : (
           <button
             ref={pendingBtnRef}
             onClick={handleMarkPending}
             onKeyDown={handlePendingKeyDown}
+            disabled={!canSubmit}
             style={{
               width: '100%',
               padding: '10px',
-              background: '#dc2626',
+              background: canSubmit ? '#dc2626' : '#d1d5db',
               color: 'white',
               border: 'none',
               borderRadius: '4px',
-              fontSize: '14px',
+              fontSize: '15px',
               fontWeight: '600',
-              cursor: 'pointer'
+              cursor: canSubmit ? 'pointer' : 'not-allowed'
             }}
           >
             ○ Marcar como PENDIENTE (Enter)
@@ -584,16 +638,401 @@ function AssignmentModal({ onSubmit, onCancel }) {
   );
 }
 
+// Confirmation Modal for daily close
+function ConfirmCloseModal({ onConfirm, onCancel, isProcessing }) {
+  const confirmBtnRef = useRef(null);
+  const [ready, setReady] = useState(false);
+  
+  // Small delay to prevent the Enter key that opened this modal from triggering confirm
+  useEffect(() => {
+    confirmBtnRef.current?.focus();
+    const timer = setTimeout(() => setReady(true), 100);
+    return () => clearTimeout(timer);
+  }, []);
+  
+  useEffect(() => {
+    if (!ready || isProcessing) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onCancel();
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        onConfirm();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onConfirm, onCancel, ready, isProcessing]);
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'rgba(0,0,0,0.8)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1100
+    }} onClick={isProcessing ? undefined : onCancel}>
+      <div style={{
+        background: 'white',
+        padding: '24px',
+        borderRadius: '4px',
+        width: '350px',
+        textAlign: 'center'
+      }} onClick={e => e.stopPropagation()}>
+        {isProcessing ? (
+          <>
+            <div style={{ fontSize: '40px', marginBottom: '12px', animation: 'spin 1s linear infinite' }}>⏳</div>
+            <h3 style={{ margin: '0 0 12px 0', color: '#6b7280' }}>Procesando cierre...</h3>
+            <p style={{ margin: '0', fontSize: '14px', color: '#9ca3af' }}>
+              Por favor espere, esto puede tardar unos segundos.
+            </p>
+            <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: '40px', marginBottom: '12px' }}>⚠️</div>
+            <h3 style={{ margin: '0 0 12px 0', color: '#dc2626' }}>Confirmar cierre</h3>
+            <p style={{ margin: '0 0 20px 0', fontSize: '14px', color: '#4b5563' }}>
+              Va a cerrar las tareas del día.<br/>
+              <strong>Esta acción no se puede deshacer.</strong><br/>
+              ¿Está seguro?
+            </p>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button onClick={onCancel} style={{
+                flex: 1,
+                padding: '10px',
+                background: '#e5e7eb',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}>No (Esc)</button>
+              <button ref={confirmBtnRef} onClick={onConfirm} style={{
+                flex: 1,
+                padding: '10px',
+                background: '#dc2626',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: '600'
+              }}>Sí (Enter)</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Daily Close Modal - Cierre diario de tareas
+function DailyCloseModal({ incompleteTasks, employees, onClose, onConfirm }) {
+  const [reasons, setReasons] = useState({});
+  const [selectedEmployee, setSelectedEmployee] = useState('');
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const selectRef = useRef(null);
+  const inputRefs = useRef([]);
+  
+  const allTasksComplete = incompleteTasks.length === 0;
+  const hasIncomplete = incompleteTasks.length > 0;
+  
+  // Focus on first element
+  useEffect(() => {
+    if (allTasksComplete && selectRef.current) {
+      selectRef.current.focus();
+    } else if (hasIncomplete && inputRefs.current[0]) {
+      inputRefs.current[0].focus();
+    }
+  }, [allTasksComplete, hasIncomplete]);
+
+  // Handle global Escape (only if confirm modal not showing)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && !showConfirm) onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, showConfirm]);
+
+  const handleReasonChange = (taskId, reason) => {
+    setReasons(prev => ({ ...prev, [taskId]: reason }));
+  };
+
+  const handleInputKeyDown = (e, index) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      // Go to next input or to employee select
+      if (index < incompleteTasks.length - 1) {
+        inputRefs.current[index + 1]?.focus();
+      } else {
+        selectRef.current?.focus();
+      }
+    }
+  };
+
+  const handleSelectKeyDown = (e) => {
+    if (e.key === 'Enter' && selectedEmployee) {
+      e.preventDefault();
+      trySubmit();
+    }
+  };
+
+  const trySubmit = () => {
+    if (hasIncomplete) {
+      const allReasonsFilled = incompleteTasks.every(t => reasons[t.id]?.trim());
+      if (!allReasonsFilled) {
+        alert('Por favor, indica el motivo de cada tarea no completada');
+        return;
+      }
+      if (!selectedEmployee) {
+        alert('Selecciona quién firma el cierre');
+        return;
+      }
+    } else if (!selectedEmployee) {
+      alert('Selecciona quién firma el cierre');
+      return;
+    }
+    // Show confirmation modal
+    setShowConfirm(true);
+  };
+
+  const handleFinalConfirm = async () => {
+    setIsProcessing(true);
+    try {
+      await onConfirm({ 
+        reasons, 
+        employee: selectedEmployee,
+        incompleteTasks 
+      });
+    } catch (error) {
+      console.error('[DailyCloseModal] Error:', error);
+      setIsProcessing(false);
+      setShowConfirm(false);
+    }
+  };
+
+  return (
+    <>
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0,0,0,0.7)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000
+      }} onClick={onClose}>
+        <div style={{
+          background: 'white',
+          padding: '24px',
+          borderRadius: '4px',
+          width: '500px',
+          maxWidth: '95vw',
+          maxHeight: '80vh',
+          overflow: 'auto'
+        }} onClick={e => e.stopPropagation()}>
+          
+          {allTasksComplete ? (
+            <>
+              <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                <div style={{ fontSize: '48px', marginBottom: '12px' }}>✅</div>
+                <h3 style={{ margin: '0 0 8px 0', color: '#166534' }}>¡Todas las tareas completadas!</h3>
+                <p style={{ margin: '0', color: '#6b7280', fontSize: '14px' }}>
+                  ¿Desea cerrar las tareas por el día de hoy?
+                </p>
+                <p style={{ margin: '8px 0 0 0', color: '#dc2626', fontSize: '12px', fontWeight: '600' }}>
+                  ⚠️ Recuerde que no podrá modificar ninguna tarea a partir de ese momento
+                </p>
+              </div>
+              
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ fontSize: '12px', color: '#374151', display: 'block', marginBottom: '4px' }}>
+                  Firma del cierre:
+                </label>
+                <select
+                  ref={selectRef}
+                  value={selectedEmployee}
+                  onChange={e => setSelectedEmployee(e.target.value)}
+                  onKeyDown={handleSelectKeyDown}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '4px',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  <option value="">-- Selecciona empleado --</option>
+                  {employees.map(emp => (
+                    <option key={emp.id} value={`${emp.id} - ${emp.name}`}>
+                      {emp.id} - {emp.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={onClose} style={{
+                  flex: 1,
+                  padding: '10px',
+                  background: '#e5e7eb',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}>Cancelar (Esc)</button>
+                <button 
+                  onClick={trySubmit}
+                  disabled={!selectedEmployee}
+                  style={{
+                    flex: 1,
+                    padding: '10px',
+                    background: selectedEmployee ? '#16a34a' : '#d1d5db',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: selectedEmployee ? 'pointer' : 'not-allowed',
+                    fontWeight: '600'
+                  }}
+                >Confirmar Cierre (Enter)</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ marginBottom: '16px' }}>
+                <h3 style={{ margin: '0 0 8px 0', color: '#dc2626' }}>⚠️ Tareas sin completar</h3>
+                <p style={{ margin: '0', color: '#6b7280', fontSize: '13px' }}>
+                  Indica el motivo por el que no se finalizó cada tarea:
+                </p>
+              </div>
+              
+              <div style={{ marginBottom: '16px', maxHeight: '300px', overflowY: 'auto' }}>
+                {incompleteTasks.map((task, index) => (
+                  <div key={task.id} style={{
+                    padding: '12px',
+                    background: '#fef2f2',
+                    borderLeft: '3px solid #dc2626',
+                    borderRadius: '4px',
+                    marginBottom: '8px'
+                  }}>
+                    <div style={{ fontWeight: '600', fontSize: '13px', marginBottom: '6px', color: '#991b1b' }}>
+                      {task.label}
+                    </div>
+                    <input
+                      ref={el => inputRefs.current[index] = el}
+                      type="text"
+                      placeholder="¿Por qué no se finalizó?"
+                      value={reasons[task.id] || ''}
+                      onChange={e => handleReasonChange(task.id, e.target.value)}
+                      onKeyDown={e => handleInputKeyDown(e, index)}
+                      style={{
+                        width: '100%',
+                        padding: '8px',
+                        border: '1px solid #fca5a5',
+                        borderRadius: '4px',
+                        fontSize: '13px',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+              
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ fontSize: '12px', color: '#374151', display: 'block', marginBottom: '4px' }}>
+                  Firma del cierre:
+                </label>
+                <select
+                  ref={selectRef}
+                  value={selectedEmployee}
+                  onChange={e => setSelectedEmployee(e.target.value)}
+                  onKeyDown={handleSelectKeyDown}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '4px',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  <option value="">-- Selecciona empleado --</option>
+                  {employees.map(emp => (
+                    <option key={emp.id} value={`${emp.id} - ${emp.name}`}>
+                      {emp.id} - {emp.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={onClose} style={{
+                  flex: 1,
+                  padding: '10px',
+                  background: '#e5e7eb',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}>Cancelar (Esc)</button>
+                <button 
+                  onClick={trySubmit}
+                  style={{
+                    flex: 1,
+                    padding: '10px',
+                    background: '#dc2626',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontWeight: '600'
+                  }}
+                >Cerrar con incidencias (Enter)</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+      
+      {/* Confirmation sub-modal */}
+      {showConfirm && (
+        <ConfirmCloseModal
+          onConfirm={handleFinalConfirm}
+          onCancel={() => setShowConfirm(false)}
+          isProcessing={isProcessing}
+        />
+      )}
+    </>
+  );
+}
+
 // Main Kanban Board with keyboard navigation
-function KanbanBoard({ storeId, tasks }) {
+function KanbanBoard({ storeId }) {
+  const { tasks, employees, loading: configLoading } = useConfig();
   const [taskStates, setTaskStates] = useState(() => getWeeklyTaskStates(storeId));
   const [assignments, setAssignments] = useState(() => getWeeklyAssignments(storeId));
+  const [closedDays, setClosedDays] = useState(() => {
+    // Initialize closed days state
+    const closed = {};
+    for (let i = 1; i <= 7; i++) {
+      closed[i] = isDayClosed(storeId, i);
+    }
+    return closed;
+  });
   const [selectedTask, setSelectedTask] = useState(null);
   const [selectedDayIndex, setSelectedDayIndex] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null);
   const [showPinModal, setShowPinModal] = useState(false);
   const [showAssignmentModal, setShowAssignmentModal] = useState(false);
+  const [showDailyCloseModal, setShowDailyCloseModal] = useState(false);
   const [pendingAction, setPendingAction] = useState(null);
+  const [infoTask, setInfoTask] = useState(null); // For info modal
   const [syncStatus, setSyncStatus] = useState('loading'); // 'loading', 'synced', 'offline'
   
   // Keyboard navigation state
@@ -615,26 +1054,69 @@ function KanbanBoard({ storeId, tasks }) {
     loadFromApi();
   }, [storeId]);
 
-  // Filter tasks for store
-  const filteredTasks = tasks.filter(t => 
-    t.targetStores.includes('all') || t.targetStores.includes(storeId)
-  );
-
-  // Get all tasks for a specific day (including assignments)
-  const getTasksForDay = useCallback((dayIndex) => {
-    const dayTasks = filteredTasks.filter(t => t.days.includes(dayIndex + 1));
-    const dayAssignments = assignments.filter(a => a.dayOfWeek === dayIndex + 1).map(a => ({
+  // Filter tasks for store AND day using imported getTasksForDay
+  const getDayTasks = useCallback((dayIndex) => {
+    // Use ConfigContext's getTasksForDay to filter by recurrence, then filter by store
+    const dayNumber = dayIndex + 1; // 1-7
+    const tasksForDay = getTasksForDay(tasks, dayNumber);
+    const storeTasks = tasksForDay.filter(t => 
+      !t.targetStores || t.targetStores.includes('all') || t.targetStores.includes(storeId)
+    );
+    
+    // Add assignments for this day
+    const dayAssignments = assignments.filter(a => a.dayOfWeek === dayNumber).map(a => ({
       id: a.id,
       label: a.description,
       responsible: a.responsible,
       isCustom: true
     }));
-    return [...dayTasks, ...dayAssignments];
-  }, [filteredTasks, assignments]);
+    return [...storeTasks, ...dayAssignments];
+  }, [tasks, storeId, assignments]);
 
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // Escape closes info modal or daily close modal
+      if (e.key === 'Escape') {
+        if (infoTask) {
+          setInfoTask(null);
+          return;
+        }
+        if (showDailyCloseModal) {
+          setShowDailyCloseModal(false);
+          return;
+        }
+      }
+
+      // Ctrl+C opens daily close modal (only if today is not already closed)
+      if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        if (closedDays[todayIndex + 1]) {
+          alert('El día de hoy ya está cerrado.');
+          return;
+        }
+        setShowDailyCloseModal(true);
+        return;
+      }
+
+      // Ctrl+Shift+U unlocks today (requires PIN)
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'u') {
+        e.preventDefault();
+        if (!closedDays[todayIndex + 1]) {
+          alert('El día de hoy no está cerrado.');
+          return;
+        }
+        const pin = prompt('Introduce el PIN del manager para desbloquear el día:');
+        if (pin === '1983') {
+          unlockDay(storeId, todayIndex + 1);
+          setClosedDays(prev => ({ ...prev, [todayIndex + 1]: false }));
+          alert('✅ Día desbloqueado. Ya puede modificar las tareas.');
+        } else if (pin !== null) {
+          alert('❌ PIN incorrecto');
+        }
+        return;
+      }
+
       // Alt+R opens assignment modal
       if (e.altKey && e.key.toLowerCase() === 'r') {
         e.preventDefault();
@@ -643,9 +1125,9 @@ function KanbanBoard({ storeId, tasks }) {
       }
 
       // Don't handle if a modal is open
-      if (selectedTask || showPinModal || showAssignmentModal || pendingAction) return;
+      if (selectedTask || showPinModal || showAssignmentModal || pendingAction || infoTask || showDailyCloseModal) return;
 
-      const currentDayTasks = getTasksForDay(focusedDay);
+      const currentDayTasks = getDayTasks(focusedDay);
       
       switch (e.key) {
         case 'ArrowLeft':
@@ -666,6 +1148,15 @@ function KanbanBoard({ storeId, tasks }) {
           e.preventDefault();
           setFocusedTaskIndex(i => Math.min(currentDayTasks.length - 1, i + 1));
           break;
+        case 'i':
+        case 'I':
+          // Show info for focused task
+          e.preventDefault();
+          if (currentDayTasks.length > 0 && focusedTaskIndex < currentDayTasks.length) {
+            const task = currentDayTasks[focusedTaskIndex];
+            setInfoTask(task);
+          }
+          break;
         case 'Enter':
           e.preventDefault();
           if (currentDayTasks.length > 0 && focusedTaskIndex < currentDayTasks.length) {
@@ -676,11 +1167,16 @@ function KanbanBoard({ storeId, tasks }) {
             const isLocked = (state?.history?.length || 0) >= MAX_CHANGES;
             const isPast = isPastDate(date);
             const isDone = state?.status === 'DONE';
-            const isReadOnly = isPast && !isDone;
+            const dayIsClosed = closedDays[focusedDay + 1];
+            const isReadOnly = (isPast && !isDone) || dayIsClosed;
 
+            if (dayIsClosed) {
+              alert('Este día ya está cerrado. No se pueden modificar las tareas.');
+              return;
+            }
             if (isReadOnly) return;
             if (isLocked) {
-              alert('Esta tarea ha alcanzado el límite de 3 cambios.');
+              alert('Esta tarea ha alcanzado el límite de 4 cambios.');
               return;
             }
             handleTaskClick(task, focusedDay + 1, date);
@@ -691,7 +1187,7 @@ function KanbanBoard({ storeId, tasks }) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [focusedDay, focusedTaskIndex, selectedTask, showPinModal, showAssignmentModal, pendingAction, getTasksForDay, weekDates, taskStates]);
+  }, [focusedDay, focusedTaskIndex, selectedTask, showPinModal, showAssignmentModal, showDailyCloseModal, pendingAction, infoTask, getDayTasks, weekDates, taskStates, closedDays]);
 
   const handleTaskClick = (task, dayOfWeek, date) => {
     const dayIndex = dayOfWeek - 1;
@@ -736,11 +1232,123 @@ function KanbanBoard({ storeId, tasks }) {
     }));
   };
 
+  // Ref for preventing duplicate assignment submissions
+  const addingAssignmentRef = useRef(false);
   const handleAddAssignment = (form) => {
-    const newAssignment = addWeeklyAssignment(storeId, form);
-    setAssignments(prev => [...prev, newAssignment]);
-    setShowAssignmentModal(false);
+    // Prevent duplicate submissions
+    if (addingAssignmentRef.current) {
+      console.log('[Assignment] Already processing, ignoring duplicate call');
+      return;
+    }
+    addingAssignmentRef.current = true;
+    
+    try {
+      const newAssignment = addWeeklyAssignment(storeId, form);
+      setAssignments(prev => [...prev, newAssignment]);
+      setShowAssignmentModal(false);
+      // Note: Logging is handled by addWeeklyAssignment in weekService.js
+    } finally {
+      // Reset after a short delay to allow UI to update
+      setTimeout(() => {
+        addingAssignmentRef.current = false;
+      }, 500);
+    }
   };
+
+  // Get incomplete tasks for today
+  const getTodayIncompleteTasks = useCallback(() => {
+    const todayTasks = getDayTasks(todayIndex);
+    return todayTasks.filter(task => {
+      const taskKey = `${task.id}_D${todayIndex + 1}`;
+      const state = taskStates[taskKey];
+      return state?.status !== 'DONE';
+    });
+  }, [getDayTasks, todayIndex, taskStates]);
+
+  // Handle daily close - with duplicate protection
+  const closingRef = useRef(false);
+  const handleDailyClose = async (closeData) => {
+    // Prevent duplicate calls (e.g., from React StrictMode or double-click)
+    if (closingRef.current) {
+      console.log('[DailyClose] Already processing, ignoring duplicate call');
+      return;
+    }
+    closingRef.current = true;
+    
+    const { reasons, employee, incompleteTasks } = closeData;
+    const weekId = getWeekKey();
+    const dayName = DAYS[todayIndex];
+    
+    try {
+      // If there are incomplete tasks, log each with its reason
+      if (incompleteTasks && incompleteTasks.length > 0) {
+        for (const task of incompleteTasks) {
+          await saveTask({
+            action: 'saveTask',
+            weekId,
+            dayName,
+            storeId,
+            employee,
+            taskId: task.id,
+            tareaLabel: task.label,
+            prevStatus: 'PENDING',
+            status: 'CIERRE_INCOMPLETO',
+            editCount: 1,
+            obs: reasons[task.id] || ''
+          });
+        }
+      }
+      
+      // Log the daily close action
+      await saveTask({
+        action: 'saveTask',
+        weekId,
+        dayName,
+        storeId,
+        employee,
+        taskId: 'CIERRE',
+        tareaLabel: incompleteTasks?.length > 0 ? `Cierre con ${incompleteTasks.length} incidencias` : 'Cierre completo',
+        prevStatus: '',
+        status: 'CIERRE',
+        editCount: 1,
+        obs: ''
+      });
+      
+      // Save close status to localStorage and update state
+      saveDailyClose(storeId, todayIndex + 1, employee);
+      setClosedDays(prev => ({ ...prev, [todayIndex + 1]: true }));
+      
+      setShowDailyCloseModal(false);
+      alert('✅ Cierre diario registrado correctamente. Las tareas de hoy ya no se pueden modificar.');
+    } catch (error) {
+      console.error('[DailyClose] Error:', error);
+      alert('Error al registrar el cierre. Por favor, inténtalo de nuevo.');
+    } finally {
+      closingRef.current = false;
+    }
+  };
+
+  // Show loading state while config loads
+  if (configLoading) {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100%',
+        width: '100%',
+        background: '#f3f4f6'
+      }}>
+        <div style={{
+          textAlign: 'center',
+          color: '#6b7280'
+        }}>
+          <div style={{ fontSize: '40px', marginBottom: '12px' }}>⏳</div>
+          <div>Cargando configuración...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -754,7 +1362,7 @@ function KanbanBoard({ storeId, tasks }) {
       {DAYS.map((day, dayIndex) => {
         const date = weekDates[dayIndex];
         const isTodayCol = dayIndex === todayIndex;
-        const dayTasks = getTasksForDay(dayIndex);
+        const dayTasks = getDayTasks(dayIndex);
 
         return (
           <div key={day} style={{
@@ -772,14 +1380,18 @@ function KanbanBoard({ storeId, tasks }) {
             }}>
               <div style={{
                 fontWeight: '700',
-                fontSize: '12px',
+                fontSize: '13px',
                 color: '#111827',
-                textTransform: 'uppercase'
+                textTransform: 'uppercase',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
               }}>
                 {day}
-                {isTodayCol && <span style={{ marginLeft: '6px', background: '#dc2626', color: 'white', padding: '1px 6px', borderRadius: '2px', fontSize: '9px' }}>HOY</span>}
+                {isTodayCol && !closedDays[dayIndex + 1] && <span style={{ background: '#dc2626', color: 'white', padding: '1px 6px', borderRadius: '2px', fontSize: '10px' }}>HOY</span>}
+                {closedDays[dayIndex + 1] && <span style={{ background: '#6b7280', color: 'white', padding: '1px 6px', borderRadius: '2px', fontSize: '10px' }}>🔒 CERRADO</span>}
               </div>
-              <div style={{ fontSize: '10px', color: '#6b7280' }}>
+              <div style={{ fontSize: '11px', color: '#6b7280' }}>
                 {formatDateShort(date)}
               </div>
             </div>
@@ -802,8 +1414,10 @@ function KanbanBoard({ storeId, tasks }) {
                     dayIndex={dayIndex}
                     taskState={taskStates[taskKey]}
                     onTaskClick={handleTaskClick}
+                    onShowInfo={(t) => setInfoTask(t)}
                     isCustom={task.isCustom}
                     isSelected={isSelected}
+                    dayClosed={closedDays[dayIndex + 1]}
                   />
                 );
               })}
@@ -859,7 +1473,7 @@ function KanbanBoard({ storeId, tasks }) {
           </span>
         </div>
         <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '4px' }}>
-          ↑↓←→ Navegar | Enter Abrir | Alt+R Encargo | Esc Cerrar
+          ←→↑↓ Navegar | Enter Abrir | i Info | Ctrl+C Cierre | Esc Cerrar
         </div>
       </div>
 
@@ -881,7 +1495,61 @@ function KanbanBoard({ storeId, tasks }) {
           taskState={taskStates[`${selectedTask.id}_D${selectedDayIndex + 1}`]}
           onClose={() => { setSelectedTask(null); setSelectedDayIndex(null); setSelectedDate(null); }}
           onUpdate={handleTaskUpdate}
+          employees={employees}
         />
+      )}
+
+      {/* Info Modal for task description */}
+      {infoTask && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }} onClick={() => setInfoTask(null)}>
+          <div style={{
+            background: 'white',
+            padding: '24px',
+            borderRadius: '4px',
+            width: '400px',
+            maxWidth: '90vw'
+          }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 12px 0', fontSize: '16px' }}>{infoTask.label}</h3>
+            {infoTask.category && (
+              <span style={{
+                ...getCategoryStyle(infoTask.category),
+                display: 'inline-block',
+                marginBottom: '12px'
+              }}>{infoTask.category}</span>
+            )}
+            <p style={{ 
+              margin: '0 0 16px 0', 
+              fontSize: '14px', 
+              color: '#374151',
+              lineHeight: '1.5'
+            }}>
+              {infoTask.description || 'Sin descripción disponible'}
+            </p>
+            <button
+              onClick={() => setInfoTask(null)}
+              style={{
+                width: '100%',
+                padding: '10px',
+                background: '#e5e7eb',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: '600'
+              }}
+            >Cerrar (Esc)</button>
+          </div>
+        </div>
       )}
 
       {showPinModal && (
@@ -895,6 +1563,15 @@ function KanbanBoard({ storeId, tasks }) {
         <AssignmentModal
           onSubmit={handleAddAssignment}
           onCancel={() => setShowAssignmentModal(false)}
+        />
+      )}
+
+      {showDailyCloseModal && (
+        <DailyCloseModal
+          incompleteTasks={getTodayIncompleteTasks()}
+          employees={employees}
+          onClose={() => setShowDailyCloseModal(false)}
+          onConfirm={handleDailyClose}
         />
       )}
     </div>

@@ -1,0 +1,145 @@
+DOCUMENTACIÓN TÉCNICA - ZAPATERIAS PASTOR OPS
+=============================================
+
+1. CÓDIGOS DE RECURRENCIA (Columna E - Config_Tareas)
+-----------------------------------------------------
+Formato: String numérico (ISO-8601: 1=Lunes, 7=Domingo).
+
+Ejemplos:
+- "0"      -> DIARIO (Todos los días de la semana).
+- "1"      -> Solo Lunes.
+- "135"    -> Lunes, Miércoles y Viernes.
+- "67"     -> Sábado y Domingo (Fin de semana).
+- "123456" -> De Lunes a Sábado.
+- "36"     -> Miércoles y Sábado.
+
+IMPORTANTE: También se aceptan letras españolas (legacy):
+- L=Lunes, M=Martes, X=Miércoles, J=Jueves, V=Viernes, S=Sábado, D=Domingo
+- Ejemplo: "L,X,V" = Lunes, Miércoles, Viernes
+- Se recomienda usar formato numérico para consistencia.
+
+2. CATEGORÍAS (Columna D - Config_Tareas)
+-----------------------------------------
+Etiquetas usadas para agrupar visualmente por prioridad.
+Valores permitidos (Case Sensitive - Respetar mayúsculas):
+
+| Categoría  | Color Badge      | Descripción                      |
+|------------|------------------|----------------------------------|
+| "Mañana"   | Naranja/Ámbar    | Prioridad Alta - Inicio turno    |
+| "Dia"      | Azul             | Mantenimiento recurrente         |
+| "A fondo"  | Rosa/Magenta     | Limpiezas profundas puntuales    |
+| "Cierre"   | Gris (default)   | Bloqueantes para irse a casa     |
+
+3. LÓGICA DE FOTO (Columna G - Config_Tareas: requiresPhoto)
+------------------------------------------------------------
+- TRUE  -> La App requerirá foto (futuro feature).
+- FALSE -> Checkbox libre.
+
+4. CÓDIGOS DE TIENDA (Columna F - Config_Tareas: targetStores)
+--------------------------------------------------------------
+Formato: Lista separada por comas o "all".
+
+| Código | Tienda           |
+|--------|------------------|
+| "T1"   | Tienda Colón     |
+| "T2"   | Tienda Ruzafa    |
+| "T3"   | Tienda [Nombre]  |
+| "T4"   | Tienda [Nombre]  |
+| "T5"   | Tienda Online    |
+| "all"  | Todas las tiendas|
+
+Ejemplos:
+- "all"     -> Aplica a todas las tiendas
+- "T1"      -> Solo Tienda Colón
+- "T1,T3"   -> Solo Tiendas Colón y [Nombre]
+
+URL de acceso: /?store=T1, /?store=T2, etc.
+
+5. ESTRUCTURA Google Sheets - Config_Tareas
+-------------------------------------------
+| Columna | Header       | Tipo    | Ejemplo                    |
+|---------|--------------|---------|----------------------------|
+| A       | id           | String  | T01, T02, T03...           |
+| B       | label        | String  | Limpieza Caja              |
+| C       | description  | String  | Limpiar con trapo húmedo   |
+| D       | category     | String  | Mañana, Dia, A fondo, Cierre|
+| E       | recurrence   | String  | 0, 135, 67...              |
+| F       | targetStores | String  | all, T1, T1,T2             |
+| G       | requiresPhoto| Boolean | TRUE, FALSE                |
+
+6. ESTRUCTURA Google Sheets - Config_Empleados
+----------------------------------------------
+| Columna | Header | Tipo   | Ejemplo     |
+|---------|--------|--------|-------------|
+| A       | id     | String | 3, 12, 24   |
+| B       | name   | String | Melanie     |
+
+7. MAPEO DE ESTADOS (Logs)
+--------------------------
+| Estado             | Descripción                           |
+|--------------------|---------------------------------------|
+| "PENDING"          | Pendiente                             |
+| "DONE"             | Realizada                             |
+| "CREATED"          | Encargo creado por responsable        |
+| "CIERRE"           | Cierre diario registrado              |
+| "CIERRE_INCOMPLETO"| Tarea no completada en cierre diario  |
+
+8. ESTRUCTURA Log (11 columnas forenses)
+----------------------------------------
+| Col | Header     | Descripción                    |
+|-----|------------|--------------------------------|
+| A   | Timestamp  | Fecha/hora del cambio          |
+| B   | weekId     | Semana ISO (2025-W49)          |
+| C   | dayName    | Nombre del día (Lunes, Martes) |
+| D   | tienda     | Código tienda (T1, T2...)      |
+| E   | empleado   | ID - Nombre empleado           |
+| F   | tareaId    | ID tarea, "ENCARGO" o "CIERRE" |
+| G   | tareaLabel | Nombre/descripción tarea       |
+| H   | prevStatus | Estado anterior                |
+| I   | newStatus  | Nuevo estado                   |
+| J   | editCount  | Número de edición (1-4 max)    |
+| K   | obs        | Observaciones/Motivo           |
+
+9. ATAJOS DE TECLADO (WebApp)
+-----------------------------
+| Tecla      | Acción                              |
+|------------|-------------------------------------|
+| ←→         | Navegar entre días (columnas)       |
+| ↑↓         | Navegar entre tareas                |
+| Enter      | Abrir modal de tarea seleccionada   |
+| i          | Mostrar info/descripción de tarea   |
+| Ctrl+C     | Cierre diario de tareas             |
+| Alt+R      | Crear nuevo encargo (requiere PIN)  |
+| Esc        | Cerrar modal abierto                |
+
+Nota: Ctrl+C no aparece en leyenda UI (solo para responsables)
+      Alt+R no aparece en leyenda UI (solo para responsables)
+
+10. PIN DE MANAGER
+------------------
+PIN para crear encargos: 1983
+
+11. LÍMITE DE CAMBIOS
+---------------------
+Máximo 4 cambios por tarea/día (evitar abusos de marcar/desmarcar).
+
+12. LÓGICA DE COLORES (Semáforo de Estados)
+-------------------------------------------
+| Condición              | Borde   | Fondo   | Texto estado   |
+|------------------------|---------|---------|----------------|
+| DONE (completada)      | Verde   | Verde   | ✓ + Empleado   |
+| Día pasado sin hacer   | Rojo    | Rojo    | ⚠️ RETRASADA   |
+| Pendiente HOY          | Naranja | Naranja | Pendiente      |
+| Pendiente futuro       | Gris    | Gris    | Pendiente      |
+
+13. CIERRE DIARIO (Ctrl+C)
+--------------------------
+- Si todas las tareas del día están DONE:
+  → Pide confirmación + firma empleado
+  → Registra "CIERRE" en log
+
+- Si hay tareas pendientes:
+  → Muestra lista de tareas sin completar
+  → Pide motivo para cada una
+  → Pide firma empleado
+  → Registra "CIERRE_INCOMPLETO" para cada tarea + "CIERRE" general

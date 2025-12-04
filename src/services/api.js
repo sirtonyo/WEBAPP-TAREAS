@@ -125,6 +125,57 @@ export const isApiConfigured = () => {
 };
 
 /**
+ * Fetch configuration (tasks and employees) from backend
+ * @param {string} storeId - Store identifier (e.g., 'T1', 'T2')
+ * @returns {Promise<Object>} Configuration data { tasks: [...], employees: [...] }
+ */
+export const fetchConfig = async (storeId) => {
+  try {
+    const url = `${API_URL}?action=getConfig&storeId=${encodeURIComponent(storeId)}`;
+    
+    console.log('[API] Fetching config for store:', storeId);
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    console.log('[API] Config received:', data);
+    console.log('[API] Tasks count:', data.tasks?.length || 0);
+    console.log('[API] Employees count:', data.employees?.length || 0);
+    
+    // Expected response format:
+    // {
+    //   success: true,
+    //   tasks: [{ id, label, category, recurrence, requiresPhoto, description, targetStores }, ...],
+    //   employees: [{ id, name }, ...]
+    // }
+    
+    return {
+      tasks: data.tasks || [],
+      employees: data.employees || [],
+      success: data.success === true && (data.tasks?.length > 0 || data.employees?.length > 0)
+    };
+  } catch (error) {
+    console.error('[API] Error fetching config:', error);
+    return {
+      tasks: [],
+      employees: [],
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+/**
  * Get the current API URL (for debugging)
  * @returns {string}
  */

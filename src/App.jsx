@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import KanbanBoard from './components/KanbanBoard';
-import tasksData from './data/tasks.json';
+import { ConfigProvider, useConfig } from './contexts/ConfigContext';
 import { STORES } from './components/ConfigScreen';
 import { getWeekKey, getMondayOfWeek, formatDateShort } from './services/weekService';
 
@@ -115,7 +115,9 @@ function App() {
 
       {/* Main Content - Full Screen */}
       <main style={{ flex: 1, overflow: 'hidden', padding: '4px' }}>
-        <KanbanBoard storeId={storeId} tasks={tasksData} />
+        <ConfigProvider storeId={storeId}>
+          <KanbanBoard storeId={storeId} />
+        </ConfigProvider>
       </main>
     </div>
   );

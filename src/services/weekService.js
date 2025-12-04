@@ -249,3 +249,53 @@ export const addWeeklyAssignment = (storeId, assignment) => {
   
   return newAssignment;
 };
+
+// ============ DAILY CLOSE MANAGEMENT ============
+
+// Get daily close status for a specific day
+export const getDailyCloseStatus = (storeId, dayOfWeek) => {
+  const weekKey = getWeekKey();
+  const storageKey = `close_${storeId}_${weekKey}`;
+  const data = localStorage.getItem(storageKey);
+  const closes = data ? JSON.parse(data) : {};
+  return closes[`D${dayOfWeek}`] || null;
+};
+
+// Check if a day is closed
+export const isDayClosed = (storeId, dayOfWeek) => {
+  const closeStatus = getDailyCloseStatus(storeId, dayOfWeek);
+  return closeStatus?.closed === true;
+};
+
+// Save daily close status
+export const saveDailyClose = (storeId, dayOfWeek, employee) => {
+  const weekKey = getWeekKey();
+  const storageKey = `close_${storeId}_${weekKey}`;
+  const data = localStorage.getItem(storageKey);
+  const closes = data ? JSON.parse(data) : {};
+  
+  closes[`D${dayOfWeek}`] = {
+    closed: true,
+    closedAt: new Date().toISOString(),
+    closedBy: employee
+  };
+  
+  localStorage.setItem(storageKey, JSON.stringify(closes));
+  return closes[`D${dayOfWeek}`];
+};
+
+// Unlock a day (for admin use from Google Sheets)
+export const unlockDay = (storeId, dayOfWeek) => {
+  const weekKey = getWeekKey();
+  const storageKey = `close_${storeId}_${weekKey}`;
+  const data = localStorage.getItem(storageKey);
+  const closes = data ? JSON.parse(data) : {};
+  
+  if (closes[`D${dayOfWeek}`]) {
+    closes[`D${dayOfWeek}`].closed = false;
+    closes[`D${dayOfWeek}`].unlockedAt = new Date().toISOString();
+    localStorage.setItem(storageKey, JSON.stringify(closes));
+  }
+  
+  return closes[`D${dayOfWeek}`];
+};
