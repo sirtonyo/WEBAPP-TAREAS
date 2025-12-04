@@ -1,93 +1,121 @@
-import { useState } from 'react';
-import './App.css';
-import ConfigScreen, { STORES } from './components/ConfigScreen';
-import TaskSection from './components/TaskSection';
+import { useState, useEffect } from 'react';
+import KanbanBoard from './components/KanbanBoard';
 import tasksData from './data/tasks.json';
+import { STORES } from './components/ConfigScreen';
+import { getWeekKey, getMondayOfWeek, formatDateShort } from './services/weekService';
 
-// Helper function to get store name from ID
+// Get store from URL
+const getStoreFromURL = () => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('store');
+};
+
+// Get store name
 const getStoreName = (storeId) => {
   const store = STORES.find(s => s.id === storeId);
   return store ? store.name : storeId;
 };
 
-// Filter tasks based on store ID
-const filterTasksByStore = (storeId) => {
-  return tasksData.filter(task => 
-    task.targetStores.includes('all') || task.targetStores.includes(storeId)
+// Store Selector
+function StoreSelector() {
+  return (
+    <div style={{
+      width: '100vw',
+      height: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: '#1f2937'
+    }}>
+      <div style={{
+        background: 'white',
+        padding: '32px',
+        borderRadius: '4px',
+        textAlign: 'center',
+        minWidth: '300px'
+      }}>
+        <h1 style={{ margin: '0 0 8px 0', fontSize: '20px', color: '#111' }}>Sistema de Tareas</h1>
+        <p style={{ margin: '0 0 20px 0', color: '#666', fontSize: '14px' }}>Selecciona tienda:</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {STORES.map(store => (
+            <button
+              key={store.id}
+              onClick={() => window.location.href = `?store=${store.id}`}
+              style={{
+                padding: '12px',
+                fontSize: '14px',
+                fontWeight: '600',
+                border: '1px solid #d1d5db',
+                borderRadius: '4px',
+                background: '#f9fafb',
+                cursor: 'pointer'
+              }}
+            >
+              {store.name}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
-};
-
-// Group tasks by category
-const groupTasksByCategory = (tasks) => {
-  const categories = ['Apertura', 'Mantenimiento', 'Cierre'];
-  const grouped = {};
-  
-  categories.forEach(category => {
-    grouped[category] = tasks.filter(task => task.category === category);
-  });
-  
-  return grouped;
-};
-
-// Helper to get initial config from localStorage
-const getInitialConfig = () => {
-  const savedName = localStorage.getItem('employeeName');
-  const savedStoreId = localStorage.getItem('storeId');
-  return {
-    isConfigured: !!(savedName && savedStoreId),
-    employeeName: savedName || '',
-    storeId: savedStoreId || ''
-  };
-};
+}
 
 function App() {
-  const [config, setConfig] = useState(getInitialConfig);
+  const [storeId, setStoreId] = useState(null);
 
-  const handleConfigComplete = () => {
-    setConfig(getInitialConfig());
-  };
+  useEffect(() => {
+    const urlStore = getStoreFromURL();
+    if (urlStore && STORES.some(s => s.id === urlStore)) {
+      setStoreId(urlStore);
+    }
+  }, []);
 
-  const handleChangeConfig = () => {
-    setConfig(prev => ({ ...prev, isConfigured: false }));
-  };
-
-  if (!config.isConfigured) {
-    return <ConfigScreen onComplete={handleConfigComplete} />;
+  if (!storeId) {
+    return <StoreSelector />;
   }
 
-  // Get filtered and grouped tasks
-  const filteredTasks = filterTasksByStore(config.storeId);
-  const groupedTasks = groupTasksByCategory(filteredTasks);
+  const monday = getMondayOfWeek();
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
 
   return (
-    <div className="app">
-      <header className="app-header">
-        <div className="header-info">
-          <h1>Tareas del Día</h1>
-          <p className="header-details">
-            <span className="employee-name">{config.employeeName}</span>
-            <span className="separator">|</span>
-            <span className="store-name">{getStoreName(config.storeId)}</span>
-          </p>
+    <div style={{
+      width: '100vw',
+      height: '100vh',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      background: '#e5e7eb',
+      margin: 0,
+      padding: 0,
+      position: 'fixed',
+      top: 0,
+      left: 0
+    }}>
+      {/* Header - Compact */}
+      <header style={{
+        background: '#1f2937',
+        color: 'white',
+        padding: '8px 16px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexShrink: 0
+      }}>
+        <div>
+          <span style={{ fontWeight: '700', fontSize: '16px' }}>📋 {getStoreName(storeId)}</span>
+          <span style={{ marginLeft: '16px', fontSize: '12px', color: '#9ca3af' }}>
+            Semana {getWeekKey()} | {formatDateShort(monday)} - {formatDateShort(sunday)}
+          </span>
         </div>
-        <button className="config-btn" onClick={handleChangeConfig}>
-          ⚙️ Configurar
-        </button>
+        <div style={{ fontSize: '12px', color: '#9ca3af' }}>
+          Hoy: {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' })}
+        </div>
       </header>
-      
-      <main className="main-content">
-        <TaskSection 
-          title="Apertura" 
-          tasks={groupedTasks['Apertura']} 
-        />
-        <TaskSection 
-          title="Mantenimiento" 
-          tasks={groupedTasks['Mantenimiento']} 
-        />
-        <TaskSection 
-          title="Cierre" 
-          tasks={groupedTasks['Cierre']} 
-        />
+
+      {/* Main Content - Full Screen */}
+      <main style={{ flex: 1, overflow: 'hidden', padding: '4px' }}>
+        <KanbanBoard storeId={storeId} tasks={tasksData} />
       </main>
     </div>
   );

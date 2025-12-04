@@ -1,10 +1,11 @@
 import { useState } from 'react';
 
 const STORES = [
-  { id: 'T1', name: 'Tienda Colón' },
-  { id: 'T2', name: 'Tienda Ruzafa' },
-  { id: 'T3', name: 'Tienda 3' },
-  { id: 'T4', name: 'Tienda 4' }
+  { id: 'T1', name: 'TIENDA 1 - SALER' },
+  { id: 'T2', name: 'TIENDA 2 - S. VICENTE' },
+  { id: 'T3', name: 'TIENDA 3 - N. CENTRO' },
+  { id: 'T4', name: 'TIENDA 4 - P RUZAFA' },
+  { id: 'T5', name: 'TIENDA 5 - ONLINE' }
 ];
 
 // Helper to get initial values from localStorage
