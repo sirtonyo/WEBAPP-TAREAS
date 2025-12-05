@@ -23,13 +23,16 @@ const DAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', '
 const MAX_CHANGES = 4;
 
 // Task Card Component - Industrial Style with Category Badge
-function TaskCard({ task, date, dayIndex, taskState, onTaskClick, isCustom, isSelected, onShowInfo, dayClosed }) {
+function TaskCard({ task, date, dayIndex, taskState, onTaskClick, isCustom, isSelected, onShowInfo, dayClosed, cardRef }) {
   const isDone = taskState?.status === 'DONE';
+  const isCierreIncompleto = taskState?.status === 'CIERRE_INCOMPLETO';
+  const isCarriedOver = taskState?.carriedOver;
   const isPast = isPastDate(date);
   const isTodayDate = isToday(date);
   const isFuture = isFutureDate(date);
   const isLocked = (taskState?.history?.length || 0) >= MAX_CHANGES;
-  const isReadOnly = (isPast && !isDone) || dayClosed;
+  const isReadOnly = (isPast && !isDone) || dayClosed || isCierreIncompleto;
+  const isAssignment = task.isCustom || task.category === 'Encargo';
 
   // Estado y colores según lógica de semáforo
   let borderColor = '#d1d5db';  // Gris default
@@ -43,6 +46,18 @@ function TaskCard({ task, date, dayIndex, taskState, onTaskClick, isCustom, isSe
     bgColor = '#dcfce7';
     statusIcon = '✓';
     statusText = taskState.employee;
+  } else if (isCierreIncompleto) {
+    // 🔴 CIERRE_INCOMPLETO - Rojo con etiqueta especial
+    borderColor = '#dc2626';
+    bgColor = '#fee2e2';
+    statusIcon = '⚠️';
+    statusText = 'RETRASADA (Cierre)';
+  } else if (isCarriedOver) {
+    // 🟡 Tarea arrastrada del día anterior - Amarillo/Naranja
+    borderColor = '#f59e0b';
+    bgColor = '#fef3c7';
+    statusIcon = '↩️';
+    statusText = `Arrastre de ${taskState.originalDay || 'ayer'}`;
   } else if (isPast) {
     // 🔴 RETRASADA - Día pasado sin completar - Rojo
     borderColor = '#dc2626';
@@ -62,10 +77,20 @@ function TaskCard({ task, date, dayIndex, taskState, onTaskClick, isCustom, isSe
     statusIcon = '';
     statusText = 'Pendiente';
   }
+  
+  // Encargos: borde azul distintivo
+  if (isAssignment && !isDone && !isCierreIncompleto) {
+    borderColor = '#3b82f6';
+    bgColor = '#eff6ff';
+  }
 
   const handleClick = () => {
     if (dayClosed) {
       alert('Este día ya está cerrado. No se pueden modificar las tareas.');
+      return;
+    }
+    if (isCierreIncompleto) {
+      alert('Esta tarea ya fue cerrada como incompleta.');
       return;
     }
     if (isReadOnly) return;
@@ -85,6 +110,7 @@ function TaskCard({ task, date, dayIndex, taskState, onTaskClick, isCustom, isSe
 
   return (
     <div
+      ref={cardRef}
       onClick={handleClick}
       style={{
         width: '100%',
@@ -102,8 +128,21 @@ function TaskCard({ task, date, dayIndex, taskState, onTaskClick, isCustom, isSe
         outlineOffset: '-2px'
       }}
     >
-      {/* Category Badge */}
-      {task.category && !isCustom && (
+      {/* Category Badge - Encargo badge is blue */}
+      {isAssignment ? (
+        <span style={{
+          position: 'absolute',
+          top: '2px',
+          right: '2px',
+          fontSize: '9px',
+          padding: '1px 4px',
+          borderRadius: '2px',
+          background: '#dbeafe',
+          color: '#1d4ed8'
+        }}>
+          📋 Encargo
+        </span>
+      ) : task.category && !isCustom && (
         <span style={{
           position: 'absolute',
           top: '2px',
@@ -117,15 +156,24 @@ function TaskCard({ task, date, dayIndex, taskState, onTaskClick, isCustom, isSe
         </span>
       )}
       
-      <div style={{ fontWeight: '600', color: '#111827', marginBottom: '2px', lineHeight: '1.2', paddingRight: '45px' }}>
-        {isCustom ? '📋 ' : ''}{task.label}
+      <div style={{ fontWeight: '600', color: '#111827', marginBottom: '2px', lineHeight: '1.2', paddingRight: '50px' }}>
+        {task.label}
       </div>
+      
+      {/* Show responsible and helper for assignments */}
+      {isAssignment && task.responsible && (
+        <div style={{ fontSize: '10px', color: '#3b82f6', marginBottom: '2px' }}>
+          👤 {task.responsible}
+          {task.helper && <span style={{ marginLeft: '4px', color: '#6b7280' }}>+ {task.helper}</span>}
+        </div>
+      )}
+      
       <div style={{ 
         display: 'flex',
         alignItems: 'center',
         gap: '4px',
         fontSize: '11px', 
-        color: isDone ? '#166534' : isPast ? '#b91c1c' : isTodayDate ? '#c2410c' : '#6b7280'
+        color: isDone ? '#166534' : isCierreIncompleto ? '#b91c1c' : isPast ? '#b91c1c' : isTodayDate ? '#c2410c' : '#6b7280'
       }}>
         <span>{statusIcon} {statusText}</span>
         {/* Info icon */}
@@ -638,6 +686,669 @@ function AssignmentModal({ onSubmit, onCancel }) {
   );
 }
 
+// Notes Summary Card - Single card showing note count for the day
+function NotesSummaryCard({ notes, onClick, isSelected, cardRef }) {
+  const unreadCount = notes.filter(n => !n.readBy || n.readBy.length === 0).length;
+  const totalCount = notes.length;
+  
+  if (totalCount === 0) return null;
+  
+  return (
+    <div
+      ref={cardRef}
+      onClick={onClick}
+      style={{
+        width: '100%',
+        padding: '10px',
+        marginBottom: '6px',
+        background: unreadCount > 0 ? '#fde047' : '#fef9c3',
+        borderLeft: '4px solid #eab308',
+        borderRadius: '2px',
+        cursor: 'pointer',
+        fontSize: '13px',
+        boxSizing: 'border-box',
+        position: 'relative',
+        outline: isSelected ? '2px solid #3b82f6' : 'none',
+        outlineOffset: '-2px',
+        fontWeight: unreadCount > 0 ? '600' : 'normal',
+        boxShadow: unreadCount > 0 ? '0 2px 4px rgba(234, 179, 8, 0.3)' : 'none'
+      }}
+    >
+      <div style={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'space-between'
+      }}>
+        <span style={{ color: '#78350f' }}>
+          📝 {totalCount} nota{totalCount > 1 ? 's' : ''}
+          {unreadCount > 0 && (
+            <span style={{ 
+              marginLeft: '6px',
+              background: '#dc2626',
+              color: 'white',
+              padding: '2px 6px',
+              borderRadius: '10px',
+              fontSize: '10px'
+            }}>
+              {unreadCount} sin leer
+            </span>
+          )}
+        </span>
+        <span style={{ fontSize: '11px', color: '#a16207' }}>▶</span>
+      </div>
+    </div>
+  );
+}
+
+// Create Note Modal - Always for current day, strict keyboard nav
+function CreateNoteModal({ employees, currentDay, onSubmit, onCancel }) {
+  const [message, setMessage] = useState('');
+  const [author, setAuthor] = useState('');
+  const msgRef = useRef(null);
+  const authorRef = useRef(null);
+  const submitRef = useRef(null);
+
+  useEffect(() => {
+    // Auto-focus textarea on mount
+    setTimeout(() => msgRef.current?.focus(), 50);
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onCancel]);
+
+  const handleSubmit = (e) => {
+    e?.preventDefault();
+    if (!message.trim() || !author) {
+      alert('Escribe un mensaje y selecciona quién lo escribe');
+      return;
+    }
+    // Just submit - parent handles closing the modal
+    onSubmit({ message, author, dayOfWeek: currentDay });
+  };
+
+  const handleMsgKeyDown = (e) => {
+    // ArrowDown or Tab moves to employee selector
+    if (e.key === 'ArrowDown' || e.key === 'Tab') {
+      e.preventDefault();
+      authorRef.current?.focus();
+    }
+  };
+
+  const handleAuthorKeyDown = (e) => {
+    if (e.key === 'Enter' && author) {
+      e.preventDefault();
+      submitRef.current?.focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      msgRef.current?.focus();
+    } else if (e.key === 'ArrowDown' && author) {
+      e.preventDefault();
+      submitRef.current?.focus();
+    }
+  };
+
+  const handleSubmitKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSubmit();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      authorRef.current?.focus();
+    }
+  };
+
+  const dayName = DAYS[currentDay - 1];
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'rgba(0,0,0,0.7)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000
+    }} onClick={onCancel}>
+      <div style={{
+        background: '#fef9c3',
+        padding: '24px',
+        borderRadius: '4px',
+        width: '400px',
+        border: '2px solid #eab308'
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h3 style={{ margin: 0, color: '#78350f' }}>📝 Nueva Nota</h3>
+          <span style={{ 
+            background: '#fbbf24', 
+            color: '#78350f', 
+            padding: '4px 10px', 
+            borderRadius: '4px', 
+            fontSize: '12px',
+            fontWeight: '600'
+          }}>{dayName}</span>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <textarea
+            ref={msgRef}
+            placeholder="Escribe tu mensaje para el relevo... *"
+            value={message}
+            onChange={e => setMessage(e.target.value)}
+            onKeyDown={handleMsgKeyDown}
+            style={{ 
+              width: '100%', 
+              padding: '10px', 
+              border: '1px solid #eab308', 
+              borderRadius: '4px', 
+              marginBottom: '12px', 
+              boxSizing: 'border-box',
+              minHeight: '100px',
+              resize: 'vertical',
+              fontFamily: 'inherit',
+              fontSize: '14px'
+            }}
+          />
+          <select
+            ref={authorRef}
+            value={author}
+            onChange={e => setAuthor(e.target.value)}
+            onKeyDown={handleAuthorKeyDown}
+            style={{ 
+              width: '100%', 
+              padding: '10px', 
+              border: '1px solid #eab308', 
+              borderRadius: '4px', 
+              marginBottom: '16px', 
+              boxSizing: 'border-box',
+              background: 'white',
+              fontSize: '14px'
+            }}
+          >
+            <option value="">-- ¿Quién escribe? --</option>
+            {employees.map(emp => (
+              <option key={emp.id} value={`${emp.id} - ${emp.name}`}>
+                {emp.id} - {emp.name}
+              </option>
+            ))}
+          </select>
+          <button 
+            ref={submitRef}
+            type="submit"
+            disabled={!message.trim() || !author}
+            onKeyDown={handleSubmitKeyDown}
+            style={{
+              width: '100%',
+              padding: '12px',
+              background: message.trim() && author ? '#eab308' : '#d1d5db',
+              color: message.trim() && author ? '#78350f' : '#6b7280',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: message.trim() && author ? 'pointer' : 'not-allowed',
+              fontWeight: '600',
+              fontSize: '14px'
+          }}>📤 Publicar Nota</button>
+        </form>
+        <p style={{ margin: '12px 0 0 0', fontSize: '11px', color: '#a16207', textAlign: 'center' }}>
+          ↓ Empleado → Enter → Publicar | Esc cancelar
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Daily Notes Modal - Lists all notes for a day with reading functionality
+function DailyNotesModal({ notes, dayName, employees, onMarkRead, onClose, isReadOnly = false }) {
+  const [selectedNote, setSelectedNote] = useState(null);
+  const [reader, setReader] = useState('');
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const selectRef = useRef(null);
+  const markReadRef = useRef(null);
+  const noteRefs = useRef({});
+  const listContainerRef = useRef(null);
+  
+  // Sort: unread first, then by date (newest first)
+  const sortedNotes = [...notes].sort((a, b) => {
+    const aRead = a.readBy && a.readBy.length > 0;
+    const bRead = b.readBy && b.readBy.length > 0;
+    if (aRead !== bRead) return aRead ? 1 : -1; // Unread first
+    // Newest first (by id which includes timestamp)
+    return b.id.localeCompare(a.id);
+  });
+  
+  // Count unread notes for mandatory read logic
+  const unreadCount = notes.filter(n => !n.readBy || n.readBy.length === 0).length;
+  const canClose = unreadCount === 0 || isReadOnly;
+
+  // When a note is selected for reading, focus the employee selector
+  useEffect(() => {
+    if (selectedNote && !selectedNote.readBy?.length && !isReadOnly) {
+      setTimeout(() => selectRef.current?.focus(), 50);
+    }
+  }, [selectedNote, isReadOnly]);
+  
+  // Auto-scroll to selected note in list
+  useEffect(() => {
+    if (!selectedNote && noteRefs.current[selectedIndex]) {
+      noteRefs.current[selectedIndex].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [selectedIndex, selectedNote]);
+
+  // Keyboard navigation for list and close blocking
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Block ESC if unread notes exist (unless in read-only mode)
+      if (e.key === 'Escape') {
+        if (selectedNote) {
+          // In detail view - go back to list
+          e.preventDefault();
+          setSelectedNote(null);
+          setReader('');
+        } else if (canClose) {
+          onClose();
+        } else {
+          e.preventDefault();
+          // Optional: show feedback
+        }
+        return;
+      }
+      
+      // List navigation when not viewing a specific note
+      if (!selectedNote && sortedNotes.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setSelectedIndex(i => Math.min(sortedNotes.length - 1, i + 1));
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSelectedIndex(i => Math.max(0, i - 1));
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          handleSelectNote(sortedNotes[selectedIndex]);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, selectedNote, sortedNotes, selectedIndex, canClose]);
+
+  const handleSelectNote = (note) => {
+    setSelectedNote(note);
+    setReader('');
+  };
+
+  const handleMarkRead = () => {
+    if (!reader) {
+      alert('Selecciona quién ha leído la nota');
+      selectRef.current?.focus();
+      return;
+    }
+    onMarkRead(selectedNote.id, reader);
+    setSelectedNote(null);
+    setReader('');
+  };
+
+  const handleSelectKeyDown = (e) => {
+    if (e.key === 'Enter' && reader) {
+      e.preventDefault();
+      markReadRef.current?.focus();
+    }
+  };
+
+  const handleMarkReadKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleMarkRead();
+    }
+  };
+
+  const handleBackToList = () => {
+    setSelectedNote(null);
+    setReader('');
+  };
+  
+  const handleCloseClick = () => {
+    if (canClose) {
+      onClose();
+    }
+  };
+  
+  // Block backdrop click if unread notes
+  const handleBackdropClick = () => {
+    if (canClose) {
+      onClose();
+    }
+  };
+
+  const isNoteRead = (note) => note.readBy && note.readBy.length > 0;
+
+  // Render individual note view
+  if (selectedNote) {
+    const alreadyRead = isNoteRead(selectedNote);
+    
+    return (
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0,0,0,0.8)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1100
+      }}>
+        <div style={{
+          background: '#fef9c3',
+          padding: '24px',
+          borderRadius: '4px',
+          width: '450px',
+          maxWidth: '95vw',
+          border: '2px solid #eab308'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <span style={{ fontSize: '24px' }}>📝</span>
+            <h3 style={{ margin: 0, color: '#78350f', flex: 1 }}>Nota de {dayName}</h3>
+            {alreadyRead && <span style={{ fontSize: '20px' }}>✅</span>}
+          </div>
+          
+          <div style={{ 
+            background: alreadyRead ? '#fef9c3' : '#fde047', 
+            padding: '16px', 
+            borderRadius: '4px',
+            marginBottom: '16px',
+            whiteSpace: 'pre-wrap',
+            lineHeight: '1.6',
+            color: '#78350f',
+            fontSize: '14px',
+            border: alreadyRead ? 'none' : '2px solid #fbbf24',
+            fontWeight: alreadyRead ? 'normal' : '500'
+          }}>
+            {selectedNote.message}
+          </div>
+          
+          <div style={{ fontSize: '12px', color: '#a16207', marginBottom: '16px' }}>
+            <div>✍️ <strong>{selectedNote.author}</strong></div>
+            <div>📅 {selectedNote.createdAt}</div>
+            {alreadyRead && (
+              <div style={{ marginTop: '8px', color: '#16a34a' }}>
+                ✅ Leído por: {selectedNote.readBy.join(', ')}
+              </div>
+            )}
+          </div>
+
+          {!alreadyRead && !isReadOnly ? (
+            <>
+              <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: '#78350f', fontWeight: '600' }}>
+                ¿Quién ha leído esta nota?
+              </label>
+              <select
+                ref={selectRef}
+                value={reader}
+                onChange={e => setReader(e.target.value)}
+                onKeyDown={handleSelectKeyDown}
+                style={{ 
+                  width: '100%', 
+                  padding: '12px', 
+                  border: '2px solid #eab308', 
+                  borderRadius: '4px', 
+                  marginBottom: '12px', 
+                  boxSizing: 'border-box',
+                  background: 'white',
+                  fontSize: '14px'
+                }}
+              >
+                <option value="">-- Seleccionar empleado --</option>
+                {employees.map(emp => (
+                  <option key={emp.id} value={`${emp.id} - ${emp.name}`}>
+                    {emp.id} - {emp.name}
+                  </option>
+                ))}
+              </select>
+              <button 
+                ref={markReadRef}
+                onClick={handleMarkRead}
+                onKeyDown={handleMarkReadKeyDown}
+                disabled={!reader}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  background: reader ? '#16a34a' : '#d1d5db',
+                  color: reader ? 'white' : '#6b7280',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: reader ? 'pointer' : 'not-allowed',
+                  fontWeight: '600',
+                  fontSize: '14px'
+              }}>✓ Marcar como Leído</button>
+              <p style={{ margin: '12px 0 0 0', fontSize: '11px', color: '#a16207', textAlign: 'center' }}>
+                Selecciona empleado → Enter → Marcar Leído
+              </p>
+            </>
+          ) : !alreadyRead && isReadOnly ? (
+            <>
+              <div style={{ 
+                background: '#fef3c7', 
+                border: '1px solid #f59e0b', 
+                borderRadius: '4px', 
+                padding: '10px', 
+                marginBottom: '12px',
+                fontSize: '12px',
+                color: '#92400e',
+                textAlign: 'center'
+              }}>
+                🔒 Día cerrado - Solo lectura
+              </div>
+              <button 
+                onClick={handleBackToList}
+                autoFocus
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  background: '#e5e7eb',
+                  color: '#374151',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+              }}>← Volver a la lista</button>
+            </>
+          ) : (
+            <button 
+              onClick={handleBackToList}
+              autoFocus
+              style={{
+                width: '100%',
+                padding: '12px',
+                background: '#e5e7eb',
+                color: '#374151',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '14px'
+            }}>← Volver a la lista</button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Render notes list
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'rgba(0,0,0,0.7)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000
+    }} onClick={handleBackdropClick}>
+      <div style={{
+        background: '#fef9c3',
+        padding: '24px',
+        borderRadius: '4px',
+        width: '500px',
+        maxWidth: '95vw',
+        maxHeight: '80vh',
+        border: '2px solid #eab308',
+        display: 'flex',
+        flexDirection: 'column'
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+          <span style={{ fontSize: '24px' }}>📝</span>
+          <h3 style={{ margin: 0, color: '#78350f', flex: 1 }}>Notas de {dayName}</h3>
+          {unreadCount > 0 && (
+            <span style={{ 
+              background: '#dc2626', 
+              color: 'white', 
+              padding: '4px 10px', 
+              borderRadius: '4px', 
+              fontSize: '11px',
+              fontWeight: '600'
+            }}>
+              {unreadCount} sin leer
+            </span>
+          )}
+          <span style={{ 
+            background: '#fbbf24', 
+            color: '#78350f', 
+            padding: '4px 10px', 
+            borderRadius: '4px', 
+            fontSize: '12px' 
+          }}>
+            {notes.length} nota{notes.length > 1 ? 's' : ''}
+          </span>
+        </div>
+        
+        {/* Mandatory read warning */}
+        {!canClose && (
+          <div style={{ 
+            background: '#fef3c7', 
+            border: '1px solid #f59e0b', 
+            borderRadius: '4px', 
+            padding: '8px 12px', 
+            marginBottom: '12px',
+            fontSize: '12px',
+            color: '#92400e',
+            textAlign: 'center'
+          }}>
+            ⚠️ Debes leer todas las notas para cerrar
+          </div>
+        )}
+        
+        {/* Read-only indicator */}
+        {isReadOnly && (
+          <div style={{ 
+            background: '#e5e7eb', 
+            border: '1px solid #9ca3af', 
+            borderRadius: '4px', 
+            padding: '8px 12px', 
+            marginBottom: '12px',
+            fontSize: '12px',
+            color: '#4b5563',
+            textAlign: 'center'
+          }}>
+            🔒 Día cerrado - Solo lectura
+          </div>
+        )}
+        
+        <div 
+          ref={listContainerRef}
+          style={{ 
+            flex: 1, 
+            overflowY: 'auto', 
+            marginBottom: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px'
+          }}
+        >
+          {sortedNotes.map((note, index) => {
+            const read = isNoteRead(note);
+            const isSelected = index === selectedIndex;
+            return (
+              <div
+                key={note.id}
+                ref={el => { noteRefs.current[index] = el; }}
+                onClick={() => handleSelectNote(note)}
+                style={{
+                  padding: '12px',
+                  background: read ? '#fef9c3' : '#fde047',
+                  borderLeft: `4px solid ${read ? '#a3a3a3' : '#eab308'}`,
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  opacity: read ? 0.7 : 1,
+                  fontWeight: read ? 'normal' : '600',
+                  outline: isSelected ? '2px solid #3b82f6' : 'none',
+                  outlineOffset: '-2px',
+                  transform: isSelected ? 'translateX(4px)' : 'none',
+                  transition: 'transform 0.1s, outline 0.1s'
+                }}
+              >
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'space-between',
+                  marginBottom: '4px'
+                }}>
+                  <span style={{ fontSize: '10px', color: '#a16207' }}>
+                    {note.author} - {note.createdAt}
+                  </span>
+                  {read ? (
+                    <span style={{ fontSize: '10px', color: '#16a34a' }}>✅ Leído</span>
+                  ) : (
+                    <span style={{ 
+                      fontSize: '9px', 
+                      background: '#dc2626', 
+                      color: 'white', 
+                      padding: '2px 6px', 
+                      borderRadius: '4px' 
+                    }}>NUEVO</span>
+                  )}
+                </div>
+                <div style={{ 
+                  color: '#78350f', 
+                  fontSize: '13px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}>
+                  {note.message}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        
+        <p style={{ margin: '0 0 12px 0', fontSize: '11px', color: '#a16207', textAlign: 'center' }}>
+          ↑↓ Navegar | Enter Abrir nota
+        </p>
+        
+        <button 
+          onClick={handleCloseClick}
+          disabled={!canClose}
+          style={{
+            width: '100%',
+            padding: '12px',
+            background: canClose ? '#e5e7eb' : '#f3f4f6',
+            color: canClose ? '#374151' : '#9ca3af',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: canClose ? 'pointer' : 'not-allowed',
+            fontSize: '14px'
+        }}>{canClose ? 'Cerrar (Esc)' : '🔒 Lee todas las notas'}</button>
+      </div>
+    </div>
+  );
+}
+
 // Confirmation Modal for daily close
 function ConfirmCloseModal({ onConfirm, onCancel, isProcessing }) {
   const confirmBtnRef = useRef(null);
@@ -1017,6 +1728,13 @@ function KanbanBoard({ storeId }) {
   const { tasks, employees, loading: configLoading } = useConfig();
   const [taskStates, setTaskStates] = useState(() => getWeeklyTaskStates(storeId));
   const [assignments, setAssignments] = useState(() => getWeeklyAssignments(storeId));
+  const [notes, setNotes] = useState(() => {
+    // Load notes from localStorage
+    const weekKey = getWeekKey();
+    const storageKey = `notes_${storeId}_${weekKey}`;
+    const data = localStorage.getItem(storageKey);
+    return data ? JSON.parse(data) : [];
+  });
   const [closedDays, setClosedDays] = useState(() => {
     // Initialize closed days state
     const closed = {};
@@ -1031,6 +1749,8 @@ function KanbanBoard({ storeId }) {
   const [showPinModal, setShowPinModal] = useState(false);
   const [showAssignmentModal, setShowAssignmentModal] = useState(false);
   const [showDailyCloseModal, setShowDailyCloseModal] = useState(false);
+  const [showNoteModal, setShowNoteModal] = useState(false);
+  const [viewingDayNotes, setViewingDayNotes] = useState(null); // day index (0-6) to view notes modal
   const [pendingAction, setPendingAction] = useState(null);
   const [infoTask, setInfoTask] = useState(null); // For info modal
   const [syncStatus, setSyncStatus] = useState('loading'); // 'loading', 'synced', 'offline'
@@ -1038,6 +1758,9 @@ function KanbanBoard({ storeId }) {
   // Keyboard navigation state
   const [focusedDay, setFocusedDay] = useState(getDayOfWeek() - 1);
   const [focusedTaskIndex, setFocusedTaskIndex] = useState(0);
+  
+  // Refs for auto-scroll
+  const taskRefs = useRef({});
 
   const weekDates = getWeekDates();
   const todayIndex = getDayOfWeek() - 1;
@@ -1053,6 +1776,22 @@ function KanbanBoard({ storeId }) {
     };
     loadFromApi();
   }, [storeId]);
+  
+  // Save notes to localStorage when they change
+  useEffect(() => {
+    const weekKey = getWeekKey();
+    const storageKey = `notes_${storeId}_${weekKey}`;
+    localStorage.setItem(storageKey, JSON.stringify(notes));
+  }, [notes, storeId]);
+
+  // Auto-scroll to focused item
+  useEffect(() => {
+    const refKey = `${focusedDay}_${focusedTaskIndex}`;
+    const element = taskRefs.current[refKey];
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [focusedDay, focusedTaskIndex]);
 
   // Filter tasks for store AND day using imported getTasksForDay
   const getDayTasks = useCallback((dayIndex) => {
@@ -1068,10 +1807,27 @@ function KanbanBoard({ storeId }) {
       id: a.id,
       label: a.description,
       responsible: a.responsible,
-      isCustom: true
+      helper: a.helper,
+      isCustom: true,
+      category: 'Encargo'
     }));
-    return [...storeTasks, ...dayAssignments];
+    
+    // Combine and sort by category priority
+    const allTasks = [...storeTasks, ...dayAssignments];
+    const categoryOrder = { 'Mañana': 1, 'Dia': 2, 'A fondo': 3, 'Cierre': 4, 'Encargo': 5 };
+    
+    return allTasks.sort((a, b) => {
+      const orderA = categoryOrder[a.category] || 99;
+      const orderB = categoryOrder[b.category] || 99;
+      return orderA - orderB;
+    });
   }, [tasks, storeId, assignments]);
+  
+  // Get notes for a specific day
+  const getDayNotes = useCallback((dayIndex) => {
+    const dayNumber = dayIndex + 1;
+    return notes.filter(n => n.dayOfWeek === dayNumber);
+  }, [notes]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -1123,11 +1879,27 @@ function KanbanBoard({ storeId }) {
         setShowPinModal(true);
         return;
       }
+      
+      // Alt+N opens note modal (only for today if not closed)
+      if (e.altKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        const todayIsClosed = closedDays[todayIndex + 1];
+        if (todayIsClosed) {
+          alert('No puedes crear notas: el día de hoy ya está cerrado.');
+          return;
+        }
+        setShowNoteModal(true);
+        return;
+      }
 
       // Don't handle if a modal is open
-      if (selectedTask || showPinModal || showAssignmentModal || pendingAction || infoTask || showDailyCloseModal) return;
+      if (selectedTask || showPinModal || showAssignmentModal || pendingAction || infoTask || showDailyCloseModal || showNoteModal || viewingDayNotes !== null) return;
 
       const currentDayTasks = getDayTasks(focusedDay);
+      const currentDayNotes = getDayNotes(focusedDay);
+      // Notes summary is a single item (if notes exist), then tasks
+      const hasNotes = currentDayNotes.length > 0;
+      const totalItems = (hasNotes ? 1 : 0) + currentDayTasks.length;
       
       switch (e.key) {
         case 'ArrowLeft':
@@ -1146,40 +1918,54 @@ function KanbanBoard({ storeId }) {
           break;
         case 'ArrowDown':
           e.preventDefault();
-          setFocusedTaskIndex(i => Math.min(currentDayTasks.length - 1, i + 1));
+          setFocusedTaskIndex(i => Math.min(totalItems - 1, i + 1));
           break;
         case 'i':
         case 'I':
-          // Show info for focused task
+          // Show info for focused task (only if not on a note)
           e.preventDefault();
-          if (currentDayTasks.length > 0 && focusedTaskIndex < currentDayTasks.length) {
-            const task = currentDayTasks[focusedTaskIndex];
-            setInfoTask(task);
+          // Show info for focused task (only if on a task, not notes summary)
+          e.preventDefault();
+          if (hasNotes && focusedTaskIndex === 0) {
+            // On notes summary - do nothing for 'i'
+          } else {
+            const taskIdx = hasNotes ? focusedTaskIndex - 1 : focusedTaskIndex;
+            if (taskIdx >= 0 && taskIdx < currentDayTasks.length) {
+              const task = currentDayTasks[taskIdx];
+              setInfoTask(task);
+            }
           }
           break;
         case 'Enter':
           e.preventDefault();
-          if (currentDayTasks.length > 0 && focusedTaskIndex < currentDayTasks.length) {
-            const task = currentDayTasks[focusedTaskIndex];
-            const date = weekDates[focusedDay];
-            const taskKey = `${task.id}_D${focusedDay + 1}`;
-            const state = taskStates[taskKey];
-            const isLocked = (state?.history?.length || 0) >= MAX_CHANGES;
-            const isPast = isPastDate(date);
-            const isDone = state?.status === 'DONE';
-            const dayIsClosed = closedDays[focusedDay + 1];
-            const isReadOnly = (isPast && !isDone) || dayIsClosed;
+          // If on notes summary, open daily notes modal
+          if (hasNotes && focusedTaskIndex === 0) {
+            setViewingDayNotes(focusedDay);
+          } else {
+            // On a task
+            const taskIdx = hasNotes ? focusedTaskIndex - 1 : focusedTaskIndex;
+            if (taskIdx >= 0 && taskIdx < currentDayTasks.length) {
+              const task = currentDayTasks[taskIdx];
+              const date = weekDates[focusedDay];
+              const taskKey = `${task.id}_D${focusedDay + 1}`;
+              const state = taskStates[taskKey];
+              const isLocked = (state?.history?.length || 0) >= MAX_CHANGES;
+              const isPast = isPastDate(date);
+              const isDone = state?.status === 'DONE';
+              const dayIsClosed = closedDays[focusedDay + 1];
+              const isReadOnly = (isPast && !isDone) || dayIsClosed;
 
-            if (dayIsClosed) {
-              alert('Este día ya está cerrado. No se pueden modificar las tareas.');
-              return;
+              if (dayIsClosed) {
+                alert('Este día ya está cerrado. No se pueden modificar las tareas.');
+                return;
+              }
+              if (isReadOnly) return;
+              if (isLocked) {
+                alert('Esta tarea ha alcanzado el límite de 4 cambios.');
+                return;
+              }
+              handleTaskClick(task, focusedDay + 1, date);
             }
-            if (isReadOnly) return;
-            if (isLocked) {
-              alert('Esta tarea ha alcanzado el límite de 4 cambios.');
-              return;
-            }
-            handleTaskClick(task, focusedDay + 1, date);
           }
           break;
       }
@@ -1187,7 +1973,7 @@ function KanbanBoard({ storeId }) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [focusedDay, focusedTaskIndex, selectedTask, showPinModal, showAssignmentModal, showDailyCloseModal, pendingAction, infoTask, getDayTasks, weekDates, taskStates, closedDays]);
+  }, [focusedDay, focusedTaskIndex, selectedTask, showPinModal, showAssignmentModal, showDailyCloseModal, pendingAction, infoTask, getDayTasks, getDayNotes, weekDates, taskStates, closedDays, showNoteModal, viewingDayNotes]);
 
   const handleTaskClick = (task, dayOfWeek, date) => {
     const dayIndex = dayOfWeek - 1;
@@ -1254,6 +2040,30 @@ function KanbanBoard({ storeId }) {
       }, 500);
     }
   };
+  
+  // Handle adding a new note
+  const handleAddNote = (noteData) => {
+    const newNote = {
+      id: `NOTE-${Date.now()}`,
+      message: noteData.message,
+      author: noteData.author,
+      dayOfWeek: noteData.dayOfWeek,
+      createdAt: new Date().toLocaleString('es-ES'),
+      readBy: []
+    };
+    setNotes(prev => [...prev, newNote]);
+    setShowNoteModal(false);
+  };
+  
+  // Handle marking a note as read
+  const handleMarkNoteRead = (noteId, reader) => {
+    setNotes(prev => prev.map(n => 
+      n.id === noteId 
+        ? { ...n, readBy: [...(n.readBy || []), reader] }
+        : n
+    ));
+    // Don't close the modal - let the DailyNotesModal handle navigation
+  };
 
   // Get incomplete tasks for today
   const getTodayIncompleteTasks = useCallback(() => {
@@ -1278,11 +2088,14 @@ function KanbanBoard({ storeId }) {
     const { reasons, employee, incompleteTasks } = closeData;
     const weekId = getWeekKey();
     const dayName = DAYS[todayIndex];
+    const isNotSunday = todayIndex < 6; // 0=Lunes, 6=Domingo
+    const dayNumber = todayIndex + 1;
     
     try {
-      // If there are incomplete tasks, log each with its reason
+      // If there are incomplete tasks, log each with its reason AND create carry-over for tomorrow
       if (incompleteTasks && incompleteTasks.length > 0) {
         for (const task of incompleteTasks) {
+          // 1. Mark original task as CIERRE_INCOMPLETO
           await saveTask({
             action: 'saveTask',
             weekId,
@@ -1296,7 +2109,80 @@ function KanbanBoard({ storeId }) {
             editCount: 1,
             obs: reasons[task.id] || ''
           });
+          
+          // 2. Create carry-over for tomorrow (except Sunday -> Monday for tasks)
+          if (isNotSunday) {
+            const tomorrowDayName = DAYS[todayIndex + 1];
+            await saveTask({
+              action: 'saveTask',
+              weekId,
+              dayName: tomorrowDayName,
+              storeId,
+              employee: 'SISTEMA',
+              taskId: task.id,
+              tareaLabel: task.label,
+              prevStatus: '',
+              status: 'PENDING',
+              editCount: 0,
+              obs: `Tarea retrasada de ${dayName}`
+            });
+            
+            // Also update local state to show the task as pending tomorrow
+            const tomorrowTaskKey = `${task.id}_D${todayIndex + 2}`;
+            setTaskStates(prev => ({
+              ...prev,
+              [tomorrowTaskKey]: {
+                status: 'PENDING',
+                employee: 'SISTEMA',
+                carriedOver: true,
+                originalDay: dayName,
+                history: [{
+                  timestamp: new Date().toLocaleString('es-ES'),
+                  employee: 'SISTEMA',
+                  status: 'PENDING'
+                }]
+              }
+            }));
+          }
+          
+          // Update local state for the original task
+          const taskKey = `${task.id}_D${todayIndex + 1}`;
+          setTaskStates(prev => ({
+            ...prev,
+            [taskKey]: {
+              ...prev[taskKey],
+              status: 'CIERRE_INCOMPLETO',
+              employee: employee,
+              history: [{
+                timestamp: new Date().toLocaleString('es-ES'),
+                employee: employee,
+                status: 'CIERRE_INCOMPLETO'
+              }, ...(prev[taskKey]?.history || [])].slice(0, 4)
+            }
+          }));
         }
+      }
+      
+      // Rolling for unread notes - ALWAYS carries over (even Sunday -> Monday)
+      const todayNotes = notes.filter(n => n.dayOfWeek === dayNumber);
+      const unreadNotes = todayNotes.filter(n => !n.readBy || n.readBy.length === 0);
+      
+      if (unreadNotes.length > 0) {
+        // Determine tomorrow's day number (for notes, Sunday rolls to Monday which would be next week day 1)
+        const tomorrowDayNumber = todayIndex === 6 ? 1 : todayIndex + 2;
+        
+        // Clone unread notes to tomorrow
+        const clonedNotes = unreadNotes.map(note => ({
+          ...note,
+          id: `NOTE-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          dayOfWeek: tomorrowDayNumber,
+          createdAt: note.createdAt, // Keep original creation time
+          message: `[Nota de ${dayName}] ${note.message}`,
+          readBy: [] // Reset read status
+        }));
+        
+        setNotes(prev => [...prev, ...clonedNotes]);
+        console.log(`[DailyClose] Cloned ${unreadNotes.length} unread notes to day ${tomorrowDayNumber}`);
       }
       
       // Log the daily close action
@@ -1311,7 +2197,7 @@ function KanbanBoard({ storeId }) {
         prevStatus: '',
         status: 'CIERRE',
         editCount: 1,
-        obs: ''
+        obs: unreadNotes.length > 0 ? `+${unreadNotes.length} notas sin leer arrastradas` : ''
       });
       
       // Save close status to localStorage and update state
@@ -1319,7 +2205,8 @@ function KanbanBoard({ storeId }) {
       setClosedDays(prev => ({ ...prev, [todayIndex + 1]: true }));
       
       setShowDailyCloseModal(false);
-      alert('✅ Cierre diario registrado correctamente. Las tareas de hoy ya no se pueden modificar.');
+      const notesMsg = unreadNotes.length > 0 ? ` ${unreadNotes.length} nota(s) sin leer pasadas al día siguiente.` : '';
+      alert(`✅ Cierre diario registrado correctamente.${notesMsg} Las tareas de hoy ya no se pueden modificar.`);
     } catch (error) {
       console.error('[DailyClose] Error:', error);
       alert('Error al registrar el cierre. Por favor, inténtalo de nuevo.');
@@ -1402,9 +2289,21 @@ function KanbanBoard({ storeId }) {
               overflowY: 'auto',
               padding: '4px'
             }}>
+              {/* Notes Summary Card - pinned to top (single card for all notes) */}
+              {getDayNotes(dayIndex).length > 0 && (
+                <NotesSummaryCard
+                  notes={getDayNotes(dayIndex)}
+                  onClick={() => setViewingDayNotes(dayIndex)}
+                  isSelected={focusedDay === dayIndex && focusedTaskIndex === 0}
+                  cardRef={el => { taskRefs.current[`${dayIndex}_0`] = el; }}
+                />
+              )}
+              
+              {/* Tasks sorted by category */}
               {dayTasks.map((task, taskIndex) => {
                 const taskKey = `${task.id}_D${dayIndex + 1}`;
-                const isSelected = focusedDay === dayIndex && focusedTaskIndex === taskIndex;
+                const hasNotes = getDayNotes(dayIndex).length > 0;
+                const isSelected = focusedDay === dayIndex && focusedTaskIndex === (hasNotes ? taskIndex + 1 : taskIndex);
                 
                 return (
                   <TaskCard
@@ -1418,6 +2317,7 @@ function KanbanBoard({ storeId }) {
                     isCustom={task.isCustom}
                     isSelected={isSelected}
                     dayClosed={closedDays[dayIndex + 1]}
+                    cardRef={el => { taskRefs.current[`${dayIndex}_${hasNotes ? taskIndex + 1 : taskIndex}`] = el; }}
                   />
                 );
               })}
@@ -1572,6 +2472,26 @@ function KanbanBoard({ storeId }) {
           employees={employees}
           onClose={() => setShowDailyCloseModal(false)}
           onConfirm={handleDailyClose}
+        />
+      )}
+      
+      {showNoteModal && (
+        <CreateNoteModal
+          employees={employees}
+          currentDay={todayIndex + 1}
+          onSubmit={handleAddNote}
+          onCancel={() => setShowNoteModal(false)}
+        />
+      )}
+      
+      {viewingDayNotes !== null && (
+        <DailyNotesModal
+          notes={getDayNotes(viewingDayNotes)}
+          dayName={DAYS[viewingDayNotes]}
+          employees={employees}
+          onMarkRead={handleMarkNoteRead}
+          onClose={() => setViewingDayNotes(null)}
+          isReadOnly={closedDays[viewingDayNotes + 1] || isPastDate(weekDates[viewingDayNotes])}
         />
       )}
     </div>
