@@ -792,6 +792,7 @@ function CreateNoteModal({ employees, currentDay, onSubmit, onCancel }) {
   const handleSubmitKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
+      e.stopPropagation(); // Prevent Enter from bubbling to global keyboard handler
       handleSubmit();
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
@@ -1074,8 +1075,15 @@ function DailyNotesModal({ notes, dayName, employees, onMarkRead, onClose, isRea
             <div>✍️ <strong>{selectedNote.author}</strong></div>
             <div>📅 {selectedNote.createdAt}</div>
             {alreadyRead && (
-              <div style={{ marginTop: '8px', color: '#16a34a' }}>
-                ✅ Leído por: {selectedNote.readBy.join(', ')}
+              <div style={{ marginTop: '8px', padding: '8px', background: '#dcfce7', borderRadius: '4px' }}>
+                {selectedNote.readBy.map((read, idx) => (
+                  <div key={idx} style={{ color: '#166534', fontSize: '11px', marginBottom: idx < selectedNote.readBy.length - 1 ? '4px' : 0 }}>
+                    ✅ <strong>{typeof read === 'string' ? read : read.employee}</strong>
+                    {typeof read === 'object' && read.readAt && (
+                      <span style={{ color: '#6b7280', marginLeft: '8px' }}>({read.readAt})</span>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -1302,7 +1310,11 @@ function DailyNotesModal({ notes, dayName, employees, onMarkRead, onClose, isRea
                     {note.author} - {note.createdAt}
                   </span>
                   {read ? (
-                    <span style={{ fontSize: '10px', color: '#16a34a' }}>✅ Leído</span>
+                    <span style={{ fontSize: '10px', color: '#16a34a' }}>
+                      ✅ {typeof note.readBy[0] === 'string' 
+                        ? note.readBy[0].split(' - ')[0] 
+                        : note.readBy[0]?.employee?.split(' - ')[0] || 'Leído'}
+                    </span>
                   ) : (
                     <span style={{ 
                       fontSize: '9px', 
@@ -1809,16 +1821,26 @@ function KanbanBoard({ storeId }) {
       responsible: a.responsible,
       helper: a.helper,
       isCustom: true,
+      isAssignment: true, // Mark as assignment for daily close logic
       category: 'Encargo'
     }));
     
-    // Combine and sort by category priority
+    // Combine and sort by category priority with Arqueo exception
     const allTasks = [...storeTasks, ...dayAssignments];
     const categoryOrder = { 'Mañana': 1, 'Dia': 2, 'A fondo': 3, 'Cierre': 4, 'Encargo': 5 };
     
     return allTasks.sort((a, b) => {
       const orderA = categoryOrder[a.category] || 99;
       const orderB = categoryOrder[b.category] || 99;
+      
+      // Same category - check for Arqueo priority within "Mañana"
+      if (orderA === orderB && a.category === 'Mañana') {
+        const aIsArqueo = a.label?.toLowerCase().includes('arqueo de caja m');
+        const bIsArqueo = b.label?.toLowerCase().includes('arqueo de caja m');
+        if (aIsArqueo && !bIsArqueo) return -1;
+        if (!aIsArqueo && bIsArqueo) return 1;
+      }
+      
       return orderA - orderB;
     });
   }, [tasks, storeId, assignments]);
@@ -2057,20 +2079,25 @@ function KanbanBoard({ storeId }) {
   
   // Handle marking a note as read
   const handleMarkNoteRead = (noteId, reader) => {
+    const readTimestamp = new Date().toLocaleString('es-ES');
     setNotes(prev => prev.map(n => 
       n.id === noteId 
-        ? { ...n, readBy: [...(n.readBy || []), reader] }
+        ? { 
+            ...n, 
+            readBy: [...(n.readBy || []), { employee: reader, readAt: readTimestamp }] 
+          }
         : n
     ));
     // Don't close the modal - let the DailyNotesModal handle navigation
   };
 
-  // Get incomplete tasks for today
+  // Get incomplete tasks for today (includes both regular tasks AND assignments)
   const getTodayIncompleteTasks = useCallback(() => {
     const todayTasks = getDayTasks(todayIndex);
     return todayTasks.filter(task => {
       const taskKey = `${task.id}_D${todayIndex + 1}`;
       const state = taskStates[taskKey];
+      // Include both regular tasks and assignments that are not DONE
       return state?.status !== 'DONE';
     });
   }, [getDayTasks, todayIndex, taskStates]);
@@ -2095,6 +2122,11 @@ function KanbanBoard({ storeId }) {
       // If there are incomplete tasks, log each with its reason AND create carry-over for tomorrow
       if (incompleteTasks && incompleteTasks.length > 0) {
         for (const task of incompleteTasks) {
+          // Determine if this is an assignment (encargo) for better logging
+          const isEncargo = task.isAssignment || task.isCustom || task.category === 'Encargo';
+          const logTaskId = isEncargo ? 'ENCARGO' : task.id;
+          const logLabel = isEncargo ? `[Encargo] ${task.label}` : task.label;
+          
           // 1. Mark original task as CIERRE_INCOMPLETO
           await saveTask({
             action: 'saveTask',
@@ -2102,33 +2134,55 @@ function KanbanBoard({ storeId }) {
             dayName,
             storeId,
             employee,
-            taskId: task.id,
-            tareaLabel: task.label,
+            taskId: logTaskId,
+            tareaLabel: logLabel,
             prevStatus: 'PENDING',
             status: 'CIERRE_INCOMPLETO',
             editCount: 1,
             obs: reasons[task.id] || ''
           });
           
-          // 2. Create carry-over for tomorrow (except Sunday -> Monday for tasks)
-          if (isNotSunday) {
-            const tomorrowDayName = DAYS[todayIndex + 1];
+          // 2. Create carry-over for tomorrow
+          // - Regular tasks: DO NOT carry from Sunday to Monday (weekly reset)
+          // - Encargos (Assignments): ALWAYS carry over, even Sunday to Monday
+          const shouldCarryOver = isEncargo || isNotSunday;
+          
+          if (shouldCarryOver) {
+            const tomorrowDayIndex = todayIndex === 6 ? 0 : todayIndex + 1; // Sunday wraps to Monday (0)
+            const tomorrowDayNumber = tomorrowDayIndex + 1; // 1-7
+            const tomorrowDayName = DAYS[tomorrowDayIndex];
+            
             await saveTask({
               action: 'saveTask',
               weekId,
               dayName: tomorrowDayName,
               storeId,
               employee: 'SISTEMA',
-              taskId: task.id,
-              tareaLabel: task.label,
+              taskId: logTaskId,
+              tareaLabel: logLabel,
               prevStatus: '',
               status: 'PENDING',
               editCount: 0,
               obs: `Tarea retrasada de ${dayName}`
             });
             
+            // For encargos, also clone the assignment to the next day so it appears in the UI
+            if (isEncargo) {
+              const newAssignment = {
+                id: `custom_${Date.now()}`,
+                description: task.label,
+                responsible: task.responsible || '',
+                helper: task.helper || '',
+                dayOfWeek: tomorrowDayNumber,
+                createdAt: new Date().toLocaleString('es-ES'),
+                carriedFrom: dayName
+              };
+              setAssignments(prev => [...prev, newAssignment]);
+              console.log(`[DailyClose] Cloned encargo "${task.label}" to day ${tomorrowDayNumber}`);
+            }
+            
             // Also update local state to show the task as pending tomorrow
-            const tomorrowTaskKey = `${task.id}_D${todayIndex + 2}`;
+            const tomorrowTaskKey = `${task.id}_D${tomorrowDayNumber}`;
             setTaskStates(prev => ({
               ...prev,
               [tomorrowTaskKey]: {
