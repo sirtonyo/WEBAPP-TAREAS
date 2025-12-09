@@ -122,17 +122,26 @@ export const syncFromApi = async (storeId) => {
       const mergedStates = { ...localStates, ...apiData.taskStates };
       saveWeeklyTaskStates(storeId, mergedStates);
       
-      // Merge assignments
-      if (apiData.assignments && apiData.assignments.length > 0) {
-        const weekKey = getWeekKey();
-        const storageKey = `assignments_${storeId}_${weekKey}`;
-        localStorage.setItem(storageKey, JSON.stringify(apiData.assignments));
-      }
+      // Merge assignments - keep local assignments that aren't in API (like carried-over encargos)
+      const localAssignments = getWeeklyAssignments(storeId);
+      const apiAssignments = apiData.assignments || [];
+      
+      // Create a Set of API assignment IDs for quick lookup
+      const apiAssignmentIds = new Set(apiAssignments.map(a => a.id));
+      
+      // Keep local assignments that don't exist in API (carried-over ones have unique IDs)
+      const localOnlyAssignments = localAssignments.filter(a => !apiAssignmentIds.has(a.id));
+      
+      // Merge: API assignments + local-only assignments
+      const mergedAssignments = [...apiAssignments, ...localOnlyAssignments];
+      
+      const storageKey = `assignments_${storeId}_${weekKey}`;
+      localStorage.setItem(storageKey, JSON.stringify(mergedAssignments));
       
       console.log('[Sync] Data synced from API successfully');
       return {
         taskStates: mergedStates,
-        assignments: apiData.assignments || getWeeklyAssignments(storeId),
+        assignments: mergedAssignments,
         synced: true
       };
     }

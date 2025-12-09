@@ -26,11 +26,15 @@ const MAX_CHANGES = 4;
 function TaskCard({ task, date, dayIndex, taskState, onTaskClick, isCustom, isSelected, onShowInfo, dayClosed, cardRef }) {
   const isDone = taskState?.status === 'DONE';
   const isCierreIncompleto = taskState?.status === 'CIERRE_INCOMPLETO';
-  const isCarriedOver = taskState?.carriedOver;
+  // carriedOver can come from taskState (regular tasks) or task.carriedFrom (assignments)
+  const isCarriedOver = taskState?.carriedOver || task.carriedFrom;
+  const carriedFromDay = taskState?.originalDay || task.carriedFrom || 'ayer';
   const isPast = isPastDate(date);
   const isTodayDate = isToday(date);
   const isFuture = isFutureDate(date);
-  const isLocked = (taskState?.history?.length || 0) >= MAX_CHANGES;
+  // Count only changes by real employees (not SISTEMA) for the lock
+  const realChangesCount = (taskState?.history || []).filter(h => h.employee !== 'SISTEMA').length;
+  const isLocked = realChangesCount >= MAX_CHANGES;
   const isReadOnly = (isPast && !isDone) || dayClosed || isCierreIncompleto;
   const isAssignment = task.isCustom || task.category === 'Encargo';
 
@@ -57,7 +61,7 @@ function TaskCard({ task, date, dayIndex, taskState, onTaskClick, isCustom, isSe
     borderColor = '#f59e0b';
     bgColor = '#fef3c7';
     statusIcon = '↩️';
-    statusText = `Arrastre de ${taskState.originalDay || 'ayer'}`;
+    statusText = `Arrastre de ${carriedFromDay}`;
   } else if (isPast) {
     // 🔴 RETRASADA - Día pasado sin completar - Rojo
     borderColor = '#dc2626';
@@ -78,8 +82,8 @@ function TaskCard({ task, date, dayIndex, taskState, onTaskClick, isCustom, isSe
     statusText = 'Pendiente';
   }
   
-  // Encargos: borde azul distintivo
-  if (isAssignment && !isDone && !isCierreIncompleto) {
+  // Encargos: borde azul distintivo (solo si NO están arrastrados, completados o con cierre incompleto)
+  if (isAssignment && !isDone && !isCierreIncompleto && !isCarriedOver) {
     borderColor = '#3b82f6';
     bgColor = '#eff6ff';
   }
@@ -211,7 +215,9 @@ function TaskModal({ task, dayIndex, date, taskState, onClose, onUpdate, employe
   
   const isDone = taskState?.status === 'DONE';
   const history = taskState?.history || [];
-  const changesLeft = MAX_CHANGES - history.length;
+  // Count only changes by real employees (not SISTEMA) for display
+  const realChangesCount = history.filter(h => h.employee !== 'SISTEMA').length;
+  const changesLeft = MAX_CHANGES - realChangesCount;
 
   // Focus select on mount - always focus select since we now need employee for both actions
   useEffect(() => {
@@ -1452,7 +1458,7 @@ function ConfirmCloseModal({ onConfirm, onCancel, isProcessing }) {
 }
 
 // Daily Close Modal - Cierre diario de tareas
-function DailyCloseModal({ incompleteTasks, employees, onClose, onConfirm }) {
+function DailyCloseModal({ incompleteTasks, employees, onClose, onConfirm, dayIndex, dayName }) {
   const [reasons, setReasons] = useState({});
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
@@ -1529,7 +1535,8 @@ function DailyCloseModal({ incompleteTasks, employees, onClose, onConfirm }) {
       await onConfirm({ 
         reasons, 
         employee: selectedEmployee,
-        incompleteTasks 
+        incompleteTasks,
+        dayIndex // Pass the day index to close
       });
     } catch (error) {
       console.error('[DailyCloseModal] Error:', error);
@@ -1568,7 +1575,7 @@ function DailyCloseModal({ incompleteTasks, employees, onClose, onConfirm }) {
                 <div style={{ fontSize: '48px', marginBottom: '12px' }}>✅</div>
                 <h3 style={{ margin: '0 0 8px 0', color: '#166534' }}>¡Todas las tareas completadas!</h3>
                 <p style={{ margin: '0', color: '#6b7280', fontSize: '14px' }}>
-                  ¿Desea cerrar las tareas por el día de hoy?
+                  ¿Desea cerrar el {dayName}?
                 </p>
                 <p style={{ margin: '8px 0 0 0', color: '#dc2626', fontSize: '12px', fontWeight: '600' }}>
                   ⚠️ Recuerde que no podrá modificar ninguna tarea a partir de ese momento
@@ -1630,7 +1637,7 @@ function DailyCloseModal({ incompleteTasks, employees, onClose, onConfirm }) {
           ) : (
             <>
               <div style={{ marginBottom: '16px' }}>
-                <h3 style={{ margin: '0 0 8px 0', color: '#dc2626' }}>⚠️ Tareas sin completar</h3>
+                <h3 style={{ margin: '0 0 8px 0', color: '#dc2626' }}>⚠️ Cierre del {dayName} - Tareas sin completar</h3>
                 <p style={{ margin: '0', color: '#6b7280', fontSize: '13px' }}>
                   Indica el motivo por el que no se finalizó cada tarea:
                 </p>
@@ -1789,12 +1796,47 @@ function KanbanBoard({ storeId }) {
     loadFromApi();
   }, [storeId]);
   
-  // Save notes to localStorage when they change
+  // Save notes to localStorage when they change (skip if empty array on mount)
+  const notesInitialized = useRef(false);
   useEffect(() => {
+    // Skip first render if notes array is empty (prevents overwriting existing data)
+    if (!notesInitialized.current && notes.length === 0) {
+      notesInitialized.current = true;
+      return;
+    }
+    notesInitialized.current = true;
     const weekKey = getWeekKey();
     const storageKey = `notes_${storeId}_${weekKey}`;
     localStorage.setItem(storageKey, JSON.stringify(notes));
   }, [notes, storeId]);
+
+  // Save taskStates to localStorage when they change (skip if empty object on mount)
+  const taskStatesInitialized = useRef(false);
+  useEffect(() => {
+    // Skip first render if taskStates is empty (prevents overwriting existing data)
+    if (!taskStatesInitialized.current && Object.keys(taskStates).length === 0) {
+      taskStatesInitialized.current = true;
+      return;
+    }
+    taskStatesInitialized.current = true;
+    const weekKey = getWeekKey();
+    const storageKey = `tasks_${storeId}_${weekKey}`;
+    localStorage.setItem(storageKey, JSON.stringify(taskStates));
+  }, [taskStates, storeId]);
+
+  // Save assignments to localStorage when they change (skip if empty array on mount)
+  const assignmentsInitialized = useRef(false);
+  useEffect(() => {
+    // Skip first render if assignments is empty (prevents overwriting existing data)
+    if (!assignmentsInitialized.current && assignments.length === 0) {
+      assignmentsInitialized.current = true;
+      return;
+    }
+    assignmentsInitialized.current = true;
+    const weekKey = getWeekKey();
+    const storageKey = `assignments_${storeId}_${weekKey}`;
+    localStorage.setItem(storageKey, JSON.stringify(assignments));
+  }, [assignments, storeId]);
 
   // Auto-scroll to focused item
   useEffect(() => {
@@ -1822,7 +1864,8 @@ function KanbanBoard({ storeId }) {
       helper: a.helper,
       isCustom: true,
       isAssignment: true, // Mark as assignment for daily close logic
-      category: 'Encargo'
+      category: 'Encargo',
+      carriedFrom: a.carriedFrom // Preserve carried-over info for display
     }));
     
     // Combine and sort by category priority with Arqueo exception
@@ -1866,29 +1909,100 @@ function KanbanBoard({ storeId }) {
         }
       }
 
-      // Ctrl+C opens daily close modal (only if today is not already closed)
+      // Ctrl+C opens daily close modal for the FOCUSED day (not necessarily today)
       if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'c') {
         e.preventDefault();
-        if (closedDays[todayIndex + 1]) {
-          alert('El día de hoy ya está cerrado.');
+        const focusedDayNumber = focusedDay + 1;
+        const focusedDayName = DAYS[focusedDay];
+        if (closedDays[focusedDayNumber]) {
+          alert(`El ${focusedDayName} ya está cerrado.`);
           return;
         }
         setShowDailyCloseModal(true);
         return;
       }
 
-      // Ctrl+Shift+U unlocks today (requires PIN)
+      // Ctrl+Shift+U unlocks the focused day (requires PIN) - with full rollback
       if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'u') {
         e.preventDefault();
-        if (!closedDays[todayIndex + 1]) {
-          alert('El día de hoy no está cerrado.');
+        const dayToUnlock = focusedDay + 1; // focusedDay is 0-indexed, dayOfWeek is 1-indexed
+        const dayName = DAYS[focusedDay];
+        
+        if (!closedDays[dayToUnlock]) {
+          alert(`El ${dayName} no está cerrado.`);
           return;
         }
-        const pin = prompt('Introduce el PIN del manager para desbloquear el día:');
+        const pin = prompt(`Introduce el PIN del manager para desbloquear el ${dayName}:`);
         if (pin === '1983') {
-          unlockDay(storeId, todayIndex + 1);
-          setClosedDays(prev => ({ ...prev, [todayIndex + 1]: false }));
-          alert('✅ Día desbloqueado. Ya puede modificar las tareas.');
+          // === ROLLBACK: Reverse the daily close effects ===
+          
+          // 1. Calculate tomorrow's day number (where carried items went)
+          const tomorrowDayIndex = focusedDay === 6 ? 0 : focusedDay + 1;
+          const tomorrowDayNumber = tomorrowDayIndex + 1;
+          
+          // 2. Remove carried-over assignments (encargos) from tomorrow
+          setAssignments(prev => prev.filter(a => a.carriedFrom !== dayName));
+          
+          // 3. Remove carried-over notes from tomorrow
+          // Notes carried from this day have format: "[Nota de {dayName}] ..."
+          const notePrefix = `[Nota de ${dayName}]`;
+          setNotes(prev => prev.filter(n => 
+            n.dayOfWeek !== tomorrowDayNumber || !n.message.startsWith(notePrefix)
+          ));
+          
+          // 4. Remove carried-over taskStates from tomorrow and reset CIERRE_INCOMPLETO in today
+          let resetCount = 0;
+          setTaskStates(prev => {
+            const newStates = { ...prev };
+            const tomorrowSuffix = `_D${tomorrowDayNumber}`;
+            const todaySuffix = `_D${dayToUnlock}`;
+            
+            // Find and remove carried tasks from tomorrow
+            Object.keys(newStates).forEach(key => {
+              // Remove tomorrow's entries that were carried from this day
+              if (key.endsWith(tomorrowSuffix) && newStates[key]?.carriedOver && newStates[key]?.originalDay === dayName) {
+                delete newStates[key];
+              }
+              // Reset CIERRE_INCOMPLETO status to PENDING for today's tasks
+              if (key.endsWith(todaySuffix) && newStates[key]?.status === 'CIERRE_INCOMPLETO') {
+                resetCount++;
+                newStates[key] = {
+                  ...newStates[key],
+                  status: 'PENDING',
+                  history: [{
+                    timestamp: new Date().toLocaleString('es-ES'),
+                    employee: 'SISTEMA',
+                    status: 'PENDING (desbloqueado)'
+                  }, ...(newStates[key]?.history || [])].slice(0, 5)
+                };
+              }
+            });
+            
+            return newStates;
+          });
+          
+          // 5. Log the rollback action to the Sheet
+          const weekId = getWeekKey();
+          saveTask({
+            action: 'saveTask',
+            weekId,
+            dayName,
+            storeId,
+            employee: 'MANAGER',
+            taskId: 'ROLLBACK',
+            tareaLabel: 'Desbloqueo de ' + dayName,
+            prevStatus: 'CIERRE',
+            status: 'ROLLBACK',
+            editCount: 1,
+            obs: 'Dia reabierto por manager'
+          });
+          
+          // 6. Unlock the day in localStorage
+          unlockDay(storeId, dayToUnlock);
+          setClosedDays(prev => ({ ...prev, [dayToUnlock]: false }));
+          
+          console.log(`[Unlock] Day ${dayName} unlocked with full rollback`);
+          alert(`✅ ${dayName} desbloqueado. Se han eliminado las tareas/notas arrastradas al día siguiente.`);
         } else if (pin !== null) {
           alert('❌ PIN incorrecto');
         }
@@ -1971,7 +2085,9 @@ function KanbanBoard({ storeId }) {
               const date = weekDates[focusedDay];
               const taskKey = `${task.id}_D${focusedDay + 1}`;
               const state = taskStates[taskKey];
-              const isLocked = (state?.history?.length || 0) >= MAX_CHANGES;
+              // Count only changes by real employees (not SISTEMA) for the lock
+              const realChangesCount = (state?.history || []).filter(h => h.employee !== 'SISTEMA').length;
+              const isLocked = realChangesCount >= MAX_CHANGES;
               const isPast = isPastDate(date);
               const isDone = state?.status === 'DONE';
               const dayIsClosed = closedDays[focusedDay + 1];
@@ -2091,18 +2207,19 @@ function KanbanBoard({ storeId }) {
     // Don't close the modal - let the DailyNotesModal handle navigation
   };
 
-  // Get incomplete tasks for today (includes both regular tasks AND assignments)
-  const getTodayIncompleteTasks = useCallback(() => {
-    const todayTasks = getDayTasks(todayIndex);
-    return todayTasks.filter(task => {
-      const taskKey = `${task.id}_D${todayIndex + 1}`;
+  // Get incomplete tasks for the FOCUSED day (includes both regular tasks AND assignments)
+  const getFocusedDayIncompleteTasks = useCallback(() => {
+    const focusedTasks = getDayTasks(focusedDay);
+    return focusedTasks.filter(task => {
+      const taskKey = `${task.id}_D${focusedDay + 1}`;
       const state = taskStates[taskKey];
       // Include both regular tasks and assignments that are not DONE
       return state?.status !== 'DONE';
     });
-  }, [getDayTasks, todayIndex, taskStates]);
+  }, [getDayTasks, focusedDay, taskStates]);
 
   // Handle daily close - with duplicate protection
+  // Uses focusedDay to allow closing any day, not just today
   const closingRef = useRef(false);
   const handleDailyClose = async (closeData) => {
     // Prevent duplicate calls (e.g., from React StrictMode or double-click)
@@ -2112,11 +2229,11 @@ function KanbanBoard({ storeId }) {
     }
     closingRef.current = true;
     
-    const { reasons, employee, incompleteTasks } = closeData;
+    const { reasons, employee, incompleteTasks, dayIndex: closeDayIndex } = closeData;
     const weekId = getWeekKey();
-    const dayName = DAYS[todayIndex];
-    const isNotSunday = todayIndex < 6; // 0=Lunes, 6=Domingo
-    const dayNumber = todayIndex + 1;
+    const dayName = DAYS[closeDayIndex];
+    const isNotSunday = closeDayIndex < 6; // 0=Lunes, 6=Domingo
+    const dayNumber = closeDayIndex + 1;
     
     try {
       // If there are incomplete tasks, log each with its reason AND create carry-over for tomorrow
@@ -2148,7 +2265,7 @@ function KanbanBoard({ storeId }) {
           const shouldCarryOver = isEncargo || isNotSunday;
           
           if (shouldCarryOver) {
-            const tomorrowDayIndex = todayIndex === 6 ? 0 : todayIndex + 1; // Sunday wraps to Monday (0)
+            const tomorrowDayIndex = closeDayIndex === 6 ? 0 : closeDayIndex + 1; // Sunday wraps to Monday (0)
             const tomorrowDayNumber = tomorrowDayIndex + 1; // 1-7
             const tomorrowDayName = DAYS[tomorrowDayIndex];
             
@@ -2168,6 +2285,8 @@ function KanbanBoard({ storeId }) {
             
             // For encargos, also clone the assignment to the next day so it appears in the UI
             if (isEncargo) {
+              // Preserve the ORIGINAL day if this encargo was already carried over
+              const originalCarriedFrom = task.carriedFrom || dayName;
               const newAssignment = {
                 id: `custom_${Date.now()}`,
                 description: task.label,
@@ -2175,21 +2294,27 @@ function KanbanBoard({ storeId }) {
                 helper: task.helper || '',
                 dayOfWeek: tomorrowDayNumber,
                 createdAt: new Date().toLocaleString('es-ES'),
-                carriedFrom: dayName
+                carriedFrom: originalCarriedFrom // Keep original day, not current day
               };
               setAssignments(prev => [...prev, newAssignment]);
-              console.log(`[DailyClose] Cloned encargo "${task.label}" to day ${tomorrowDayNumber}`);
+              console.log(`[DailyClose] Cloned encargo "${task.label}" to day ${tomorrowDayNumber}, originally from ${originalCarriedFrom}`);
             }
             
             // Also update local state to show the task as pending tomorrow
             const tomorrowTaskKey = `${task.id}_D${tomorrowDayNumber}`;
+            // Get current task state to check if it was already carried over
+            const currentTaskKey = `${task.id}_D${dayNumber}`;
+            const currentState = taskStates[currentTaskKey];
+            // Preserve the ORIGINAL day if this task was already carried over
+            const originalDay = currentState?.originalDay || dayName;
+            
             setTaskStates(prev => ({
               ...prev,
               [tomorrowTaskKey]: {
                 status: 'PENDING',
                 employee: 'SISTEMA',
                 carriedOver: true,
-                originalDay: dayName,
+                originalDay: originalDay, // Keep original day, not current day
                 history: [{
                   timestamp: new Date().toLocaleString('es-ES'),
                   employee: 'SISTEMA',
@@ -2200,7 +2325,7 @@ function KanbanBoard({ storeId }) {
           }
           
           // Update local state for the original task
-          const taskKey = `${task.id}_D${todayIndex + 1}`;
+          const taskKey = `${task.id}_D${dayNumber}`;
           setTaskStates(prev => ({
             ...prev,
             [taskKey]: {
@@ -2223,7 +2348,7 @@ function KanbanBoard({ storeId }) {
       
       if (unreadNotes.length > 0) {
         // Determine tomorrow's day number (for notes, Sunday rolls to Monday which would be next week day 1)
-        const tomorrowDayNumber = todayIndex === 6 ? 1 : todayIndex + 2;
+        const tomorrowDayNumber = closeDayIndex === 6 ? 1 : closeDayIndex + 2;
         
         // Clone unread notes to tomorrow
         const clonedNotes = unreadNotes.map(note => ({
@@ -2251,16 +2376,16 @@ function KanbanBoard({ storeId }) {
         prevStatus: '',
         status: 'CIERRE',
         editCount: 1,
-        obs: unreadNotes.length > 0 ? `+${unreadNotes.length} notas sin leer arrastradas` : ''
+        obs: unreadNotes.length > 0 ? `${unreadNotes.length} notas sin leer arrastradas` : ''
       });
       
       // Save close status to localStorage and update state
-      saveDailyClose(storeId, todayIndex + 1, employee);
-      setClosedDays(prev => ({ ...prev, [todayIndex + 1]: true }));
+      saveDailyClose(storeId, dayNumber, employee);
+      setClosedDays(prev => ({ ...prev, [dayNumber]: true }));
       
       setShowDailyCloseModal(false);
       const notesMsg = unreadNotes.length > 0 ? ` ${unreadNotes.length} nota(s) sin leer pasadas al día siguiente.` : '';
-      alert(`✅ Cierre diario registrado correctamente.${notesMsg} Las tareas de hoy ya no se pueden modificar.`);
+      alert(`✅ Cierre de ${dayName} registrado correctamente.${notesMsg} Las tareas de ese día ya no se pueden modificar.`);
     } catch (error) {
       console.error('[DailyClose] Error:', error);
       alert('Error al registrar el cierre. Por favor, inténtalo de nuevo.');
@@ -2522,10 +2647,12 @@ function KanbanBoard({ storeId }) {
 
       {showDailyCloseModal && (
         <DailyCloseModal
-          incompleteTasks={getTodayIncompleteTasks()}
+          incompleteTasks={getFocusedDayIncompleteTasks()}
           employees={employees}
           onClose={() => setShowDailyCloseModal(false)}
           onConfirm={handleDailyClose}
+          dayIndex={focusedDay}
+          dayName={DAYS[focusedDay]}
         />
       )}
       
