@@ -2386,6 +2386,12 @@ function KanbanBoard({ storeId }) {
       setShowDailyCloseModal(false);
       const notesMsg = unreadNotes.length > 0 ? ` ${unreadNotes.length} nota(s) sin leer pasadas al día siguiente.` : '';
       alert(`✅ Cierre de ${dayName} registrado correctamente.${notesMsg} Las tareas de ese día ya no se pueden modificar.`);
+      
+      // Close PWA window after successful daily close
+      // This works in standalone PWA mode
+      if (window.matchMedia('(display-mode: standalone)').matches) {
+        window.close();
+      }
     } catch (error) {
       console.error('[DailyClose] Error:', error);
       alert('Error al registrar el cierre. Por favor, inténtalo de nuevo.');

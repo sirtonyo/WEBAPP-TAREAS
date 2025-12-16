@@ -1,8 +1,12 @@
 import { useState, useEffect } from 'react';
 import KanbanBoard from './components/KanbanBoard';
+import AdminView from './components/AdminView';
 import { ConfigProvider, useConfig } from './contexts/ConfigContext';
 import { STORES } from './components/ConfigScreen';
 import { getWeekKey, getMondayOfWeek, formatDateShort } from './services/weekService';
+
+// Admin password
+const ADMIN_PASSWORD = '1983ant';
 
 // Get store from URL
 const getStoreFromURL = () => {
@@ -17,7 +21,21 @@ const getStoreName = (storeId) => {
 };
 
 // Store Selector
-function StoreSelector() {
+function StoreSelector({ onAdminAccess }) {
+  const [showAdminPrompt, setShowAdminPrompt] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [adminError, setAdminError] = useState('');
+
+  const handleAdminSubmit = (e) => {
+    e.preventDefault();
+    if (adminPassword === ADMIN_PASSWORD) {
+      onAdminAccess();
+    } else {
+      setAdminError('Contraseña incorrecta');
+      setAdminPassword('');
+    }
+  };
+
   return (
     <div style={{
       width: '100vw',
@@ -54,6 +72,92 @@ function StoreSelector() {
               {store.name}
             </button>
           ))}
+          
+          {/* Admin Option */}
+          <div style={{ marginTop: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '16px' }}>
+            {!showAdminPrompt ? (
+              <button
+                onClick={() => setShowAdminPrompt(true)}
+                style={{
+                  padding: '12px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  border: '1px solid #7c3aed',
+                  borderRadius: '4px',
+                  background: '#f5f3ff',
+                  color: '#7c3aed',
+                  cursor: 'pointer',
+                  width: '100%'
+                }}
+              >
+                🔐 ADMIN
+              </button>
+            ) : (
+              <form onSubmit={handleAdminSubmit}>
+                <input
+                  type="password"
+                  value={adminPassword}
+                  onChange={(e) => {
+                    setAdminPassword(e.target.value);
+                    setAdminError('');
+                  }}
+                  placeholder="Contraseña admin"
+                  autoFocus
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    fontSize: '14px',
+                    border: adminError ? '1px solid #dc2626' : '1px solid #7c3aed',
+                    borderRadius: '4px',
+                    marginBottom: '8px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+                {adminError && (
+                  <div style={{ color: '#dc2626', fontSize: '12px', marginBottom: '8px' }}>
+                    {adminError}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAdminPrompt(false);
+                      setAdminPassword('');
+                      setAdminError('');
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '10px',
+                      fontSize: '13px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '4px',
+                      background: '#f9fafb',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    style={{
+                      flex: 1,
+                      padding: '10px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      border: 'none',
+                      borderRadius: '4px',
+                      background: '#7c3aed',
+                      color: 'white',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Entrar
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -62,16 +166,26 @@ function StoreSelector() {
 
 function App() {
   const [storeId, setStoreId] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     const urlStore = getStoreFromURL();
+    if (urlStore === 'admin') {
+      // Direct URL access to admin (still needs password in UI)
+      return;
+    }
     if (urlStore && STORES.some(s => s.id === urlStore)) {
       setStoreId(urlStore);
     }
   }, []);
 
+  // Admin View
+  if (isAdmin) {
+    return <AdminView onBack={() => setIsAdmin(false)} />;
+  }
+
   if (!storeId) {
-    return <StoreSelector />;
+    return <StoreSelector onAdminAccess={() => setIsAdmin(true)} />;
   }
 
   const monday = getMondayOfWeek();
